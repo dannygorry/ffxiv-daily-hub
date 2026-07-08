@@ -98,7 +98,6 @@ export function DashboardClient({
     const key = `${itemId}:${period}`
     const isCompleted = completedItems.has(key)
 
-    // Optimistic update
     setCompletedItems((prev) => {
       const next = new Set(prev)
       if (isCompleted) next.delete(key)
@@ -118,11 +117,44 @@ export function DashboardClient({
     })
 
     if (!res.ok) {
-      // Revert
       setCompletedItems((prev) => {
         const next = new Set(prev)
         if (isCompleted) next.add(key)
         else next.delete(key)
+        return next
+      })
+    }
+  }
+
+  async function toggleMany(itemIds: string[], category: "daily" | "weekly", completed: boolean) {
+    const period = category === "daily" ? dailyPeriod : weeklyPeriod
+
+    // Optimistic update — all at once
+    setCompletedItems((prev) => {
+      const next = new Set(prev)
+      for (const id of itemIds) {
+        const key = `${id}:${period}`
+        if (completed) next.add(key)
+        else next.delete(key)
+      }
+      return next
+    })
+
+    const res = await fetch("/api/checklist/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ characterId: activeCharId, itemIds, completed, resetPeriod: period }),
+    })
+
+    if (!res.ok) {
+      // Revert
+      setCompletedItems((prev) => {
+        const next = new Set(prev)
+        for (const id of itemIds) {
+          const key = `${id}:${period}`
+          if (completed) next.delete(key)
+          else next.add(key)
+        }
         return next
       })
     }
@@ -222,6 +254,7 @@ export function DashboardClient({
             category="daily"
             loading={loading}
             onToggle={toggleItem}
+            onToggleMany={toggleMany}
             subcategoryLabels={SUBCATEGORY_LABELS}
           />
         </TabsContent>
@@ -234,6 +267,7 @@ export function DashboardClient({
             category="weekly"
             loading={loading}
             onToggle={toggleItem}
+            onToggleMany={toggleMany}
             subcategoryLabels={SUBCATEGORY_LABELS}
           />
         </TabsContent>

@@ -24,6 +24,7 @@ interface ChecklistSectionProps {
   category: "daily" | "weekly"
   loading: boolean
   onToggle: (itemId: string, category: "daily" | "weekly") => void
+  onToggleMany: (itemIds: string[], category: "daily" | "weekly", completed: boolean) => void
   subcategoryLabels: Record<string, string>
 }
 
@@ -83,6 +84,7 @@ function SubcategoryGroup({
   category,
   loading,
   onToggle,
+  onToggleMany,
 }: {
   label: string
   items: ChecklistItem[]
@@ -91,31 +93,49 @@ function SubcategoryGroup({
   category: "daily" | "weekly"
   loading: boolean
   onToggle: (itemId: string, category: "daily" | "weekly") => void
+  onToggleMany: (itemIds: string[], category: "daily" | "weekly", completed: boolean) => void
 }) {
   const [collapsed, setCollapsed] = useState(false)
   const completedCount = items.filter((i) => completedKeys.has(`${i.id}:${period}`)).length
   const allDone = completedCount === items.length
   const isMiniCactpot = items.length > 0 && items.every((i) => i.name.startsWith("Mini Cactpot"))
+  const itemIds = items.map((i) => i.id)
 
   return (
     <Card className={cn("border-border", allDone && "opacity-60")}>
       <CardHeader className="py-3 px-4">
-        <button
-          className="flex items-center justify-between w-full"
-          onClick={() => setCollapsed((p) => !p)}
-        >
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-sm font-semibold">{label}</CardTitle>
-            <Badge variant="secondary" className="text-xs h-5">
+        <div className="flex items-center gap-2">
+          <button
+            className="flex items-center gap-2 flex-1 text-left min-w-0"
+            onClick={() => setCollapsed((p) => !p)}
+          >
+            {collapsed ? (
+              <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronDown className="size-4 text-muted-foreground shrink-0" />
+            )}
+            <CardTitle className="text-sm font-semibold truncate">{label}</CardTitle>
+            <Badge variant="secondary" className="text-xs h-5 shrink-0">
               {completedCount}/{items.length}
             </Badge>
+          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              disabled={loading || allDone}
+              onClick={() => onToggleMany(itemIds, category, true)}
+              className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed px-2 py-0.5 rounded hover:bg-secondary/60 transition-colors"
+            >
+              All
+            </button>
+            <button
+              disabled={loading || completedCount === 0}
+              onClick={() => onToggleMany(itemIds, category, false)}
+              className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed px-2 py-0.5 rounded hover:bg-secondary/60 transition-colors"
+            >
+              Clear
+            </button>
           </div>
-          {collapsed ? (
-            <ChevronRight className="size-4 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="size-4 text-muted-foreground" />
-          )}
-        </button>
+        </div>
       </CardHeader>
 
       {!collapsed && (
@@ -173,21 +193,12 @@ export function ChecklistSection({
   category,
   loading,
   onToggle,
+  onToggleMany,
   subcategoryLabels,
 }: ChecklistSectionProps) {
   const subcategories = Array.from(new Set(items.map((i) => i.subcategory)))
-
   const completedCount = items.filter((i) => completedKeys.has(`${i.id}:${period}`)).length
-
-  async function markAll(completed: boolean) {
-    const pending = items.filter((i) => {
-      const done = completedKeys.has(`${i.id}:${period}`)
-      return completed ? !done : done
-    })
-    for (const item of pending) {
-      await onToggle(item.id, category)
-    }
-  }
+  const allItemIds = items.map((i) => i.id)
 
   return (
     <div className="space-y-3">
@@ -196,10 +207,20 @@ export function ChecklistSection({
           {completedCount} of {items.length} completed
         </p>
         <div className="flex gap-2">
-          <Button size="xs" variant="outline" onClick={() => markAll(true)}>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={loading || completedCount === items.length}
+            onClick={() => onToggleMany(allItemIds, category, true)}
+          >
             Check all
           </Button>
-          <Button size="xs" variant="ghost" onClick={() => markAll(false)}>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={loading || completedCount === 0}
+            onClick={() => onToggleMany(allItemIds, category, false)}
+          >
             Clear all
           </Button>
         </div>
@@ -215,6 +236,7 @@ export function ChecklistSection({
           category={category}
           loading={loading}
           onToggle={onToggle}
+          onToggleMany={onToggleMany}
         />
       ))}
     </div>
