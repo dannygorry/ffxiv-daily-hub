@@ -15,6 +15,7 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { EorzeaClock } from "@/components/EorzeaClock"
 import { ResetTimers } from "@/components/ResetTimers"
 import { ChecklistSection } from "./ChecklistSection"
+import { BeastTribeGrid } from "@/components/BeastTribeGrid"
 import { SpoilerDropdown } from "@/components/SpoilerDropdown"
 import { getDailyResetPeriod, getWeeklyResetPeriod } from "@/lib/ffxiv/resets"
 import { createClient } from "@/lib/supabase/client"
@@ -163,7 +164,10 @@ export function DashboardClient({
   const { hidden, toggleExpansion, togglePatch, getExpansionState } = useSpoilerSettings()
 
   const dailyItems = checklistItems.filter(
-    (i) => i.category === "daily" && !isExpansionHidden(ITEM_EXPANSION[i.name], hidden)
+    (i) =>
+      i.category === "daily" &&
+      i.subcategory !== "beast_tribe" &&
+      !isExpansionHidden(ITEM_EXPANSION[i.name], hidden)
   )
   const weeklyItems = checklistItems.filter(
     (i) => i.category === "weekly" && !isExpansionHidden(ITEM_EXPANSION[i.name], hidden)
@@ -244,6 +248,9 @@ export function DashboardClient({
               {weeklyCompleted}/{weeklyItems.length}
             </Badge>
           </TabsTrigger>
+          <TabsTrigger value="tribes" className="flex-1 sm:flex-none">
+            Beast Tribes
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="daily" className="mt-4">
@@ -270,6 +277,10 @@ export function DashboardClient({
             onToggleMany={toggleMany}
             subcategoryLabels={SUBCATEGORY_LABELS}
           />
+        </TabsContent>
+
+        <TabsContent value="tribes" className="mt-4">
+          <BeastTribeGrid characterId={activeCharId} />
         </TabsContent>
       </Tabs>
     </div>
