@@ -50,26 +50,26 @@ function TribeCard({
   const isAtLimit = totalQuestsToday >= DAILY_QUEST_LIMIT
 
   return (
-    <div className="rounded-lg border border-border bg-card/60 p-2.5 space-y-2 min-w-0">
+    <div className="rounded-lg border border-border bg-card/60 p-3.5 space-y-3 min-w-0">
       {/* Name + rank controls */}
-      <div className="flex items-start justify-between gap-1">
-        <p className="text-xs font-semibold leading-tight">{tribe.name}</p>
-        <div className="flex items-center gap-0.5 shrink-0">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-semibold leading-tight">{tribe.name}</p>
+        <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={() => onRankDown(tribe.key)}
             disabled={isMinRank}
             title="Rank down"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-0.5"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 rounded hover:bg-secondary/50"
           >
-            <ChevronUp className="size-3 rotate-180" />
+            <ChevronUp className="size-4 rotate-180" />
           </button>
           <button
             onClick={() => onRankUp(tribe.key)}
             disabled={isMaxRank}
             title="Rank up"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-0.5"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 rounded hover:bg-secondary/50"
           >
-            <ChevronUp className="size-3" />
+            <ChevronUp className="size-4" />
           </button>
         </div>
       </div>
@@ -77,7 +77,7 @@ function TribeCard({
       {/* Rank badge */}
       <span
         className={cn(
-          "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+          "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
           RANK_COLORS[rankName] ?? "bg-secondary text-secondary-foreground"
         )}
       >
@@ -85,7 +85,7 @@ function TribeCard({
       </span>
 
       {/* Quest checkboxes */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-4">
         {[0, 1, 2].map((bit) => {
           const checked = Boolean((currentMask >> bit) & 1)
           const disabled = !checked && isAtLimit
@@ -93,7 +93,7 @@ function TribeCard({
             <label
               key={bit}
               className={cn(
-                "flex flex-col items-center gap-0.5 cursor-pointer",
+                "flex flex-col items-center gap-1.5 cursor-pointer",
                 disabled && "cursor-not-allowed opacity-40"
               )}
             >
@@ -101,9 +101,9 @@ function TribeCard({
                 checked={checked}
                 disabled={disabled}
                 onCheckedChange={(val) => onQuestToggle(tribe.key, bit, Boolean(val))}
-                className="size-3.5"
+                className="size-5"
               />
-              <span className="text-[9px] text-muted-foreground leading-none">{bit + 1}</span>
+              <span className="text-xs text-muted-foreground leading-none font-medium">{bit + 1}</span>
             </label>
           )
         })}
@@ -255,12 +255,12 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
 
       {/* Expansion columns */}
       <div className="overflow-x-auto pb-2">
-        <div className="flex gap-3 min-w-max">
+        <div className="flex gap-4 min-w-max">
           {DISPLAY_GROUPS.map((group) => {
             const tribes = BEAST_TRIBES.filter((t) => t.displayGroup === group.id)
             return (
-              <div key={group.id} className="flex flex-col gap-2 w-[148px]">
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide truncate">
+              <div key={group.id} className="flex flex-col gap-3 w-[200px]">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   {group.label}
                 </p>
                 {tribes.map((tribe) => (
