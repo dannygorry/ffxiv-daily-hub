@@ -147,11 +147,11 @@ export const ITEM_EXPANSION: Partial<Record<string, ExpansionId>> = {
   "Beast Tribe: Arkasodara": "ew",
   "Beast Tribe: Omicron": "ew61",
   "Beast Tribe: Loporrits": "ew62",
-  "Duty Roulette: Level 90 Dungeons": "ew",
+  "Level Cap Dungeons": "ew",
   // DT 7.0
   "Beast Tribe: Pelupelu": "dt",
   "Beast Tribe: Rroneek": "dt",
-  "Duty Roulette: Expert": "dt",
+  "Expert": "dt",
   "Normal Raid: Floor 1": "dt",
   "Normal Raid: Floor 2": "dt",
   "Normal Raid: Floor 3": "dt",

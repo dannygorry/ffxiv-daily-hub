@@ -27,6 +27,54 @@ interface ChecklistSectionProps {
   subcategoryLabels: Record<string, string>
 }
 
+function MiniCactpotRow({
+  items,
+  completedKeys,
+  period,
+  category,
+  loading,
+  onToggle,
+}: {
+  items: ChecklistItem[]
+  completedKeys: Set<string>
+  period: string
+  category: "daily" | "weekly"
+  loading: boolean
+  onToggle: (itemId: string, category: "daily" | "weekly") => void
+}) {
+  const allDone = items.every((i) => completedKeys.has(`${i.id}:${period}`))
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 py-2 px-2 rounded-md hover:bg-secondary/50 transition-colors",
+        allDone && "opacity-50"
+      )}
+    >
+      <div className="flex-1 min-w-0">
+        <p className={cn("text-sm font-medium", allDone && "line-through text-muted-foreground")}>
+          Mini Cactpot
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">Buy scratch tickets at the Cactpot Broker</p>
+      </div>
+      <div className="flex items-center gap-4 shrink-0">
+        {items.map((item, i) => {
+          const done = completedKeys.has(`${item.id}:${period}`)
+          return (
+            <label key={item.id} className="flex flex-col items-center gap-1 cursor-pointer">
+              <Checkbox
+                checked={done}
+                disabled={loading}
+                onCheckedChange={() => onToggle(item.id, category)}
+              />
+              <span className="text-[10px] text-muted-foreground leading-none">{i + 1}</span>
+            </label>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function SubcategoryGroup({
   label,
   items,
@@ -47,6 +95,7 @@ function SubcategoryGroup({
   const [collapsed, setCollapsed] = useState(false)
   const completedCount = items.filter((i) => completedKeys.has(`${i.id}:${period}`)).length
   const allDone = completedCount === items.length
+  const isMiniCactpot = items.length > 0 && items.every((i) => i.name.startsWith("Mini Cactpot"))
 
   return (
     <Card className={cn("border-border", allDone && "opacity-60")}>
@@ -71,35 +120,46 @@ function SubcategoryGroup({
 
       {!collapsed && (
         <CardContent className="px-4 pb-3 pt-0 space-y-1">
-          {items.map((item) => {
-            const key = `${item.id}:${period}`
-            const done = completedKeys.has(key)
-            return (
-              <label
-                key={item.id}
-                className={cn(
-                  "flex items-start gap-3 py-2 px-2 rounded-md cursor-pointer",
-                  "hover:bg-secondary/50 transition-colors",
-                  done && "opacity-50"
-                )}
-              >
-                <Checkbox
-                  checked={done}
-                  disabled={loading}
-                  onCheckedChange={() => onToggle(item.id, category)}
-                  className="mt-0.5 shrink-0"
-                />
-                <div className="min-w-0">
-                  <p className={cn("text-sm font-medium", done && "line-through text-muted-foreground")}>
-                    {item.name}
-                  </p>
-                  {item.description && (
-                    <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
+          {isMiniCactpot ? (
+            <MiniCactpotRow
+              items={items}
+              completedKeys={completedKeys}
+              period={period}
+              category={category}
+              loading={loading}
+              onToggle={onToggle}
+            />
+          ) : (
+            items.map((item) => {
+              const key = `${item.id}:${period}`
+              const done = completedKeys.has(key)
+              return (
+                <label
+                  key={item.id}
+                  className={cn(
+                    "flex items-start gap-3 py-2 px-2 rounded-md cursor-pointer",
+                    "hover:bg-secondary/50 transition-colors",
+                    done && "opacity-50"
                   )}
-                </div>
-              </label>
-            )
-          })}
+                >
+                  <Checkbox
+                    checked={done}
+                    disabled={loading}
+                    onCheckedChange={() => onToggle(item.id, category)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <p className={cn("text-sm font-medium", done && "line-through text-muted-foreground")}>
+                      {item.name}
+                    </p>
+                    {item.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
+                    )}
+                  </div>
+                </label>
+              )
+            })
+          )}
         </CardContent>
       )}
     </Card>

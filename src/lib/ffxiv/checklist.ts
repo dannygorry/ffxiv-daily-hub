@@ -10,17 +10,17 @@ export interface ChecklistItem {
 
 export const DAILY_ITEMS: Omit<ChecklistItem, "id" | "is_active">[] = [
   // Duty Roulettes
-  { name: "Duty Roulette: Expert", description: "High-level tomestones", category: "daily", subcategory: "duty_roulette", sort_order: 10 },
-  { name: "Duty Roulette: Level 90 Dungeons", description: "Level cap dungeons", category: "daily", subcategory: "duty_roulette", sort_order: 20 },
-  { name: "Duty Roulette: Level 50/60/70/80 Dungeons", description: "", category: "daily", subcategory: "duty_roulette", sort_order: 30 },
-  { name: "Duty Roulette: Leveling", description: "Exp bonus", category: "daily", subcategory: "duty_roulette", sort_order: 40 },
-  { name: "Duty Roulette: Main Scenario", description: "Tomestones + exp", category: "daily", subcategory: "duty_roulette", sort_order: 50 },
-  { name: "Duty Roulette: Trials", description: "", category: "daily", subcategory: "duty_roulette", sort_order: 60 },
-  { name: "Duty Roulette: Alliance Raids", description: "Tomestones bonus", category: "daily", subcategory: "duty_roulette", sort_order: 70 },
-  { name: "Duty Roulette: Normal Raids", description: "", category: "daily", subcategory: "duty_roulette", sort_order: 80 },
-  { name: "Duty Roulette: Frontline", description: "Wolf Marks + PvP EXP", category: "daily", subcategory: "duty_roulette", sort_order: 90 },
-  { name: "Duty Roulette: Guildhest", description: "", category: "daily", subcategory: "duty_roulette", sort_order: 100 },
-  { name: "Duty Roulette: Mentor", description: "Requires Mentor status", category: "daily", subcategory: "duty_roulette", sort_order: 110 },
+  { name: "Expert", description: "High-level tomestones", category: "daily", subcategory: "duty_roulette", sort_order: 10 },
+  { name: "Level Cap Dungeons", description: "Level cap dungeons", category: "daily", subcategory: "duty_roulette", sort_order: 20 },
+  { name: "High-level Dungeons", description: "", category: "daily", subcategory: "duty_roulette", sort_order: 30 },
+  { name: "Leveling", description: "Exp bonus", category: "daily", subcategory: "duty_roulette", sort_order: 40 },
+  { name: "Main Scenario", description: "Tomestones + exp", category: "daily", subcategory: "duty_roulette", sort_order: 50 },
+  { name: "Trials", description: "", category: "daily", subcategory: "duty_roulette", sort_order: 60 },
+  { name: "Alliance Raids", description: "Tomestones bonus", category: "daily", subcategory: "duty_roulette", sort_order: 70 },
+  { name: "Normal Raids", description: "", category: "daily", subcategory: "duty_roulette", sort_order: 80 },
+  { name: "Frontline", description: "Wolf Marks + PvP EXP", category: "daily", subcategory: "duty_roulette", sort_order: 90 },
+  { name: "Guildhests", description: "", category: "daily", subcategory: "duty_roulette", sort_order: 100 },
+  { name: "Mentor", description: "Requires Mentor status", category: "daily", subcategory: "duty_roulette", sort_order: 110 },
   // Cactpot
   { name: "Mini Cactpot 1/3", description: "Buy a scratch ticket at the Cactpot Broker", category: "daily", subcategory: "cactpot", sort_order: 200 },
   { name: "Mini Cactpot 2/3", description: "Buy a scratch ticket at the Cactpot Broker", category: "daily", subcategory: "cactpot", sort_order: 210 },
