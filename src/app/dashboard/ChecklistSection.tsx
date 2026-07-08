@@ -120,20 +120,22 @@ function SubcategoryGroup({
             </Badge>
           </button>
           <div className="flex items-center gap-1 shrink-0">
-            <button
+            <Button
+              size="xs"
+              variant="secondary"
               disabled={loading || allDone}
               onClick={() => onToggleMany(itemIds, category, true)}
-              className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed px-2 py-0.5 rounded hover:bg-secondary/60 transition-colors"
             >
               All
-            </button>
-            <button
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
               disabled={loading || completedCount === 0}
               onClick={() => onToggleMany(itemIds, category, false)}
-              className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed px-2 py-0.5 rounded hover:bg-secondary/60 transition-colors"
             >
               Clear
-            </button>
+            </Button>
           </div>
         </div>
       </CardHeader>
