@@ -82,6 +82,9 @@ export const EXPANSION_CONFIG: ExpansionConfig[] = [
   },
 ]
 
+// Update this when a new major patch releases new Expert/Level Cap content
+export const LATEST_PATCH_ID: ExpansionId = "dt75"
+
 // Flat ordered sequence of all expansion/patch IDs (chronological)
 export const ORDERED_IDS: ExpansionId[] = EXPANSION_CONFIG.flatMap(
   (e) => [e.id, ...e.patches.map((p) => p.id)]
@@ -147,11 +150,13 @@ export const ITEM_EXPANSION: Partial<Record<string, ExpansionId>> = {
   "Beast Tribe: Arkasodara": "ew",
   "Beast Tribe: Omicron": "ew61",
   "Beast Tribe: Loporrits": "ew62",
-  "Level Cap Dungeons": "ew",
   // DT 7.0
   "Beast Tribe: Pelupelu": "dt",
   "Beast Tribe: Rroneek": "dt",
-  "Expert": "dt",
+  // Expert and Level Cap Dungeons always require the latest patch content —
+  // update LATEST_PATCH_ID above when a new patch drops new Expert dungeons
+  "Expert": LATEST_PATCH_ID,
+  "Level Cap Dungeons": LATEST_PATCH_ID,
   "Normal Raid: Floor 1": "dt",
   "Normal Raid: Floor 2": "dt",
   "Normal Raid: Floor 3": "dt",
