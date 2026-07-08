@@ -254,7 +254,7 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
       </div>
 
       {/* Expansion columns */}
-      <div className="overflow-x-auto pb-2">
+      <div className="overflow-x-auto pb-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full">
         <div className="flex gap-4 min-w-max">
           {DISPLAY_GROUPS.map((group) => {
             const tribes = BEAST_TRIBES.filter((t) => t.displayGroup === group.id)
