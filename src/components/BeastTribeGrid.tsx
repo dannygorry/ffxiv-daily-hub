@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -120,6 +120,14 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
   const [dailyOffset, setDailyOffset] = useState(0)
   const [loading, setLoading] = useState(true)
 
+  // Always-current mirrors of state — lets handlers read the latest values even
+  // when React hasn't flushed a re-render between rapid clicks (stale closure fix).
+  const latestProgressRef = useRef<Record<string, TribeProgress>>({})
+  const committedProgressRef = useRef<Record<string, TribeProgress>>({})
+  const dailyOffsetRef = useRef(0)
+  // Debounce timers for rank-down, keyed by tribe
+  const rankDownTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+
   // Total quests today: offset (from rank-ups) + sum of each tribe's current mask
   const totalQuestsToday =
     dailyOffset +
@@ -142,6 +150,9 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
         map[tribe.key] = { tribe_key: tribe.key, rank_level: 1, quests_mask: 0, quest_period: "" }
       }
     }
+    latestProgressRef.current = map
+    committedProgressRef.current = { ...map }
+    dailyOffsetRef.current = data.dailyOffset ?? 0
     setProgressMap(map)
     setDailyOffset(data.dailyOffset ?? 0)
     setLoading(false)
@@ -151,15 +162,13 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
 
   const handleQuestToggle = useCallback(
     async (tribeKey: string, bit: number, value: boolean) => {
-      const prev = progressMap[tribeKey]
+      const prev = latestProgressRef.current[tribeKey]
       const prevMask = prev.quest_period === period ? prev.quests_mask : 0
       const newMask = value ? prevMask | (1 << bit) : prevMask & ~(1 << bit)
+      const updated = { ...prev, quests_mask: newMask, quest_period: period }
 
-      // Optimistic update
-      setProgressMap((p) => ({
-        ...p,
-        [tribeKey]: { ...p[tribeKey], quests_mask: newMask, quest_period: period },
-      }))
+      latestProgressRef.current = { ...latestProgressRef.current, [tribeKey]: updated }
+      setProgressMap((p) => ({ ...p, [tribeKey]: updated }))
 
       const res = await fetch("/api/beast-tribe/quest", {
         method: "POST",
@@ -167,28 +176,29 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
         body: JSON.stringify({ characterId, tribeKey, questMask: newMask, period }),
       })
       if (!res.ok) {
-        // Revert
+        latestProgressRef.current = { ...latestProgressRef.current, [tribeKey]: prev }
         setProgressMap((p) => ({ ...p, [tribeKey]: prev }))
+      } else {
+        committedProgressRef.current = { ...committedProgressRef.current, [tribeKey]: updated }
       }
     },
-    [characterId, period, progressMap]
+    [characterId, period]
   )
 
   const handleRankUp = useCallback(
     async (tribeKey: string) => {
-      const prev = progressMap[tribeKey]
+      const prev = latestProgressRef.current[tribeKey]
       const tribe = BEAST_TRIBES.find((t) => t.key === tribeKey)!
       if ((prev?.rank_level ?? 1) >= tribe.ranks.length) return
 
       const currentMask = prev.quest_period === period ? prev.quests_mask : 0
       const questsDone = maskToCount(currentMask)
       const newRank = (prev?.rank_level ?? 1) + 1
+      const updated = { ...prev, rank_level: newRank, quests_mask: 0, quest_period: period }
 
-      // Optimistic
-      setProgressMap((p) => ({
-        ...p,
-        [tribeKey]: { ...p[tribeKey], rank_level: newRank, quests_mask: 0, quest_period: period },
-      }))
+      latestProgressRef.current = { ...latestProgressRef.current, [tribeKey]: updated }
+      dailyOffsetRef.current += questsDone
+      setProgressMap((p) => ({ ...p, [tribeKey]: updated }))
       setDailyOffset((o) => o + questsDone)
 
       const res = await fetch("/api/beast-tribe/rank-up", {
@@ -197,30 +207,60 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
         body: JSON.stringify({ characterId, tribeKey, period }),
       })
       if (!res.ok) {
+        latestProgressRef.current = { ...latestProgressRef.current, [tribeKey]: prev }
+        dailyOffsetRef.current -= questsDone
         setProgressMap((p) => ({ ...p, [tribeKey]: prev }))
         setDailyOffset((o) => o - questsDone)
+      } else {
+        committedProgressRef.current = { ...committedProgressRef.current, [tribeKey]: updated }
       }
     },
-    [characterId, period, progressMap]
+    [characterId, period]
   )
 
   const handleRankDown = useCallback(
-    async (tribeKey: string) => {
-      const prev = progressMap[tribeKey]
-      if ((prev?.rank_level ?? 1) <= 1) return
-      const newRank = (prev?.rank_level ?? 1) - 1
+    (tribeKey: string) => {
+      const current = latestProgressRef.current[tribeKey]
+      if (!current || current.rank_level <= 1) return
+      const newRank = current.rank_level - 1
+      const updated = { ...current, rank_level: newRank }
 
-      setProgressMap((p) => ({ ...p, [tribeKey]: { ...p[tribeKey], rank_level: newRank } }))
+      // Update ref immediately so the next rapid click computes from the correct value
+      latestProgressRef.current = { ...latestProgressRef.current, [tribeKey]: updated }
+      setProgressMap((p) => ({ ...p, [tribeKey]: updated }))
 
-      const res = await fetch("/api/beast-tribe/rank-set", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ characterId, tribeKey, rankLevel: newRank }),
-      })
-      if (!res.ok) setProgressMap((p) => ({ ...p, [tribeKey]: prev }))
+      // Debounce the API call: a burst of 5 clicks fires one request with the final rank
+      clearTimeout(rankDownTimerRef.current[tribeKey])
+      rankDownTimerRef.current[tribeKey] = setTimeout(async () => {
+        const finalRank = latestProgressRef.current[tribeKey]?.rank_level
+        if (finalRank == null) return
+
+        const res = await fetch("/api/beast-tribe/rank-set", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ characterId, tribeKey, rankLevel: finalRank }),
+        })
+        if (res.ok) {
+          committedProgressRef.current = {
+            ...committedProgressRef.current,
+            [tribeKey]: latestProgressRef.current[tribeKey],
+          }
+        } else {
+          // Roll back to the last successfully saved state, not the stale pre-click snapshot
+          const committed = committedProgressRef.current[tribeKey]
+          if (committed) {
+            latestProgressRef.current = { ...latestProgressRef.current, [tribeKey]: committed }
+            setProgressMap((p) => ({ ...p, [tribeKey]: committed }))
+          }
+        }
+      }, 600)
     },
-    [characterId, progressMap]
+    [characterId]
   )
+
+  useEffect(() => {
+    return () => { Object.values(rankDownTimerRef.current).forEach(clearTimeout) }
+  }, [])
 
   const limitColor =
     totalQuestsToday >= DAILY_QUEST_LIMIT
