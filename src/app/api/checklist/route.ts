@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       item_id: itemId,
       completed_at: new Date().toISOString(),
       reset_period: resetPeriod,
-    })
+    }, { onConflict: "character_id,item_id,reset_period" })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   } else {
     const { error } = await supabase

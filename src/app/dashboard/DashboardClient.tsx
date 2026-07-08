@@ -15,9 +15,12 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { EorzeaClock } from "@/components/EorzeaClock"
 import { ResetTimers } from "@/components/ResetTimers"
 import { ChecklistSection } from "./ChecklistSection"
+import { SpoilerDropdown } from "@/components/SpoilerDropdown"
 import { getDailyResetPeriod, getWeeklyResetPeriod } from "@/lib/ffxiv/resets"
 import { createClient } from "@/lib/supabase/client"
 import { SUBCATEGORY_LABELS } from "@/lib/ffxiv/checklist"
+import { useSpoilerSettings } from "@/hooks/useSpoilerSettings"
+import { ITEM_EXPANSION, isExpansionHidden } from "@/lib/spoiler"
 
 interface Character {
   id: string
@@ -125,8 +128,14 @@ export function DashboardClient({
     }
   }
 
-  const dailyItems = checklistItems.filter((i) => i.category === "daily")
-  const weeklyItems = checklistItems.filter((i) => i.category === "weekly")
+  const { hidden, toggleExpansion, togglePatch, getExpansionState } = useSpoilerSettings()
+
+  const dailyItems = checklistItems.filter(
+    (i) => i.category === "daily" && !isExpansionHidden(ITEM_EXPANSION[i.name], hidden)
+  )
+  const weeklyItems = checklistItems.filter(
+    (i) => i.category === "weekly" && !isExpansionHidden(ITEM_EXPANSION[i.name], hidden)
+  )
 
   const dailyCompleted = dailyItems.filter((i) =>
     completedItems.has(`${i.id}:${dailyPeriod}`)
@@ -176,7 +185,15 @@ export function DashboardClient({
           )}
         </div>
 
-        <EorzeaClock />
+        <div className="flex items-center gap-2">
+          <SpoilerDropdown
+            hidden={hidden}
+            onToggleExpansion={toggleExpansion}
+            onTogglePatch={togglePatch}
+            getExpansionState={getExpansionState}
+          />
+          <EorzeaClock />
+        </div>
       </div>
 
       <ResetTimers />

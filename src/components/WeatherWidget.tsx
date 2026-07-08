@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo } from "react"
 import {
   ZONES,
-  REGIONS,
   WEATHER_ICON,
   getUpcomingWeather,
   getWeatherWindowStart,
@@ -12,6 +11,9 @@ import {
 } from "@/lib/ffxiv/weather"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { SpoilerDropdown } from "@/components/SpoilerDropdown"
+import { useSpoilerSettings } from "@/hooks/useSpoilerSettings"
+import { ZONE_EXPANSION, isExpansionHidden } from "@/lib/spoiler"
 
 const DEFAULT_ZONES = [
   "eastern-la-noscea",
@@ -74,6 +76,7 @@ function ZoneWeather({ zone, now }: { zone: Zone; now: Date }) {
 export function WeatherWidget() {
   const [now, setNow] = useState<Date | null>(null)
   const [selectedZones, setSelectedZones] = useState<string[]>(DEFAULT_ZONES)
+  const { hidden, toggleExpansion, togglePatch, getExpansionState } = useSpoilerSettings()
 
   useEffect(() => {
     setNow(new Date())
@@ -81,35 +84,52 @@ export function WeatherWidget() {
     return () => clearInterval(id)
   }, [])
 
+  const visibleDefaultZones = useMemo(
+    () => DEFAULT_ZONES.filter((id) => !isExpansionHidden(ZONE_EXPANSION[id], hidden)),
+    [hidden]
+  )
+
   const zones = useMemo(
-    () => ZONES.filter((z) => selectedZones.includes(z.id)),
-    [selectedZones]
+    () =>
+      ZONES.filter(
+        (z) => selectedZones.includes(z.id) && !isExpansionHidden(ZONE_EXPANSION[z.id], hidden)
+      ),
+    [selectedZones, hidden]
   )
 
   if (!now) return <div className="text-muted-foreground text-sm">Loading weather...</div>
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2 flex-wrap">
-        {ZONES.filter((z) => DEFAULT_ZONES.includes(z.id)).map((z) => (
-          <button
-            key={z.id}
-            onClick={() =>
-              setSelectedZones((prev) =>
-                prev.includes(z.id)
-                  ? prev.filter((id) => id !== z.id)
-                  : [...prev, z.id]
-              )
-            }
-            className={`text-xs px-3 py-1 rounded-full border transition-colors ${
-              selectedZones.includes(z.id)
-                ? "bg-primary text-primary-foreground border-primary"
-                : "border-border text-muted-foreground hover:border-primary/50"
-            }`}
-          >
-            {z.name}
-          </button>
-        ))}
+      <div className="flex items-center gap-2 flex-wrap">
+        {visibleDefaultZones.map((id) => {
+          const z = ZONES.find((z) => z.id === id)!
+          return (
+            <button
+              key={z.id}
+              onClick={() =>
+                setSelectedZones((prev) =>
+                  prev.includes(z.id) ? prev.filter((i) => i !== z.id) : [...prev, z.id]
+                )
+              }
+              className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+                selectedZones.includes(z.id)
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-border text-muted-foreground hover:border-primary/50"
+              }`}
+            >
+              {z.name}
+            </button>
+          )
+        })}
+        <div className="ml-auto">
+          <SpoilerDropdown
+            hidden={hidden}
+            onToggleExpansion={toggleExpansion}
+            onTogglePatch={togglePatch}
+            getExpansionState={getExpansionState}
+          />
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {zones.map((zone) => (

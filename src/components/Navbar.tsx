@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { LogOut, Settings, Users, LayoutDashboard } from "lucide-react"
+import { NavbarSpoilerButton } from "@/components/NavbarSpoilerButton"
 
 export async function Navbar() {
   const supabase = await createClient()
@@ -42,6 +43,7 @@ export async function Navbar() {
         </nav>
 
         <div className="flex items-center gap-2">
+          <NavbarSpoilerButton />
           {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

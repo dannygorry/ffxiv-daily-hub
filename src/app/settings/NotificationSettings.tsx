@@ -93,7 +93,10 @@ export function NotificationSettings({
   async function savePrefs(newPrefs: Prefs) {
     setPrefs(newPrefs)
     const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
     await supabase.from("notification_preferences").upsert({
+      user_id: user.id,
       ...newPrefs,
     })
   }
