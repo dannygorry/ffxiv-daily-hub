@@ -1,0 +1,20 @@
+{
+  "crons": [
+    {
+      "path": "/api/push/send?type=mini_cactpot",
+      "schedule": "30 14 * * *"
+    },
+    {
+      "path": "/api/push/send?type=daily_reset",
+      "schedule": "45 14 * * *"
+    },
+    {
+      "path": "/api/push/send?type=jumbo_cactpot",
+      "schedule": "30 10 * * 6"
+    },
+    {
+      "path": "/api/push/send?type=weekly_reset",
+      "schedule": "45 7 * * 2"
+    }
+  ]
+}

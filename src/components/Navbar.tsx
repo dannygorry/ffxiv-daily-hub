@@ -1,0 +1,99 @@
+import Link from "next/link"
+import { createClient } from "@/lib/supabase/server"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { LogOut, Settings, Users, LayoutDashboard } from "lucide-react"
+
+export async function Navbar() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  return (
+    <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+        <Link href="/" className="flex items-center gap-2 shrink-0">
+          <span className="text-primary font-bold text-lg tracking-tight">
+            ⚔️ FFXIV Hub
+          </span>
+        </Link>
+
+        <nav className="hidden md:flex items-center gap-1">
+          <Link
+            href="/"
+            className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
+          >
+            Home
+          </Link>
+          {user && (
+            <Link
+              href="/dashboard"
+              className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
+            >
+              Dashboard
+            </Link>
+          )}
+        </nav>
+
+        <div className="flex items-center gap-2">
+          {user ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-sm" className="rounded-full">
+                  <Avatar className="size-7">
+                    <AvatarFallback className="text-xs bg-primary text-primary-foreground">
+                      {user.email?.[0]?.toUpperCase() ?? "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem asChild>
+                  <Link href="/dashboard" className="flex items-center gap-2">
+                    <LayoutDashboard className="size-4" /> Dashboard
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/character/manage" className="flex items-center gap-2">
+                    <Users className="size-4" /> Characters
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/settings" className="flex items-center gap-2">
+                    <Settings className="size-4" /> Settings
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <form action="/api/auth/signout" method="post">
+                    <button
+                      type="submit"
+                      className="flex items-center gap-2 w-full text-left text-destructive"
+                    >
+                      <LogOut className="size-4" /> Sign Out
+                    </button>
+                  </form>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/auth/login">Sign In</Link>
+              </Button>
+              <Button size="sm" asChild>
+                <Link href="/auth/register">Register</Link>
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  )
+}
