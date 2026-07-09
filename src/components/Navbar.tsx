@@ -33,21 +33,19 @@ export async function Navbar() {
           >
             Home
           </Link>
+          <Link
+            href="/dashboard"
+            className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
+          >
+            Dashboard
+          </Link>
           {user && (
-            <>
-              <Link
-                href="/dashboard"
-                className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
-              >
-                Dashboard
-              </Link>
-              <Link
-                href="/character/card"
-                className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
-              >
-                Card Maker
-              </Link>
-            </>
+            <Link
+              href="/character/card"
+              className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
+            >
+              Card Maker
+            </Link>
           )}
         </nav>
 
