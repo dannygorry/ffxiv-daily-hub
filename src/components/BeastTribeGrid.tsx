@@ -14,6 +14,8 @@ import {
   type BeastTribe,
 } from "@/lib/ffxiv/beast-tribes"
 import { getDailyResetPeriod } from "@/lib/ffxiv/resets"
+import { useSpoilerSettings } from "@/hooks/useSpoilerSettings"
+import { isExpansionHidden, type ExpansionId } from "@/lib/spoiler"
 
 interface TribeProgress {
   tribe_key: string
@@ -29,6 +31,7 @@ function TribeCard({
   progress,
   period,
   totalQuestsToday,
+  canReachAllied,
   onQuestToggle,
   onRankUp,
   onRankDown,
@@ -37,6 +40,7 @@ function TribeCard({
   progress: TribeProgress
   period: string
   totalQuestsToday: number
+  canReachAllied: boolean
   onQuestToggle: (tribeKey: string, bit: number, value: boolean) => void
   onRankUp: (tribeKey: string) => void
   onRankDown: (tribeKey: string) => void
@@ -48,27 +52,42 @@ function TribeCard({
   const rankName = tribe.ranks[progress.rank_level - 1] ?? tribe.ranks[0]
   const isAtLimit = totalQuestsToday >= DAILY_QUEST_LIMIT
 
+  // Allied (last rank) requires all tribes in the same expansion to be at Sworn first
+  const isAtSworn = progress.rank_level === tribe.ranks.length - 1
+  const alliedLocked = isAtSworn && !canReachAllied
+  const groupLabel = DISPLAY_GROUPS.find((g) => g.id === tribe.displayGroup)?.label ?? tribe.displayGroup
+
   return (
     <div className="rounded-lg border border-border bg-card/60 p-3.5 space-y-3 min-w-0">
       {/* Name + badge on left, rank controls on right */}
       <div className="flex items-start justify-between gap-2">
         <div className="space-y-2 min-w-0">
           <p className="text-sm font-semibold leading-tight">{tribe.name}</p>
-          <span
-            className={cn(
-              "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
-              RANK_COLORS[rankName] ?? "bg-secondary text-secondary-foreground"
-            )}
-          >
-            {rankName}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
+                RANK_COLORS[rankName] ?? "bg-secondary text-secondary-foreground"
+              )}
+            >
+              {rankName}
+            </span>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {progress.rank_level}/{tribe.ranks.length}
+            </span>
+          </div>
+          {alliedLocked && (
+            <p className="text-[10px] text-amber-400/80 leading-tight">
+              Allied requires all {groupLabel} tribes at Sworn
+            </p>
+          )}
         </div>
         <div className="flex flex-col gap-1 shrink-0">
           <Button
             variant="outline"
             size="sm"
             onClick={() => onRankUp(tribe.key)}
-            disabled={isMaxRank}
+            disabled={isMaxRank || alliedLocked}
             className="h-6 px-1.5 text-[10px]"
           >
             Rank +
@@ -115,8 +134,22 @@ function TribeCard({
 
 // ─── Main grid ───────────────────────────────────────────────────────────────
 
-export function BeastTribeGrid({ characterId }: { characterId: string }) {
+export function BeastTribeGrid({
+  characterId,
+  onQuestsRemainingChange,
+}: {
+  characterId: string
+  onQuestsRemainingChange?: (remaining: number) => void
+}) {
   const period = getDailyResetPeriod()
+  const { hidden } = useSpoilerSettings()
+  const visibleTribes = BEAST_TRIBES.filter(
+    (t) => !isExpansionHidden(t.expansion as ExpansionId, hidden)
+  )
+  const visibleGroups = DISPLAY_GROUPS.filter((g) =>
+    visibleTribes.some((t) => t.displayGroup === g.id)
+  )
+
   const [progressMap, setProgressMap] = useState<Record<string, TribeProgress>>({})
   const [dailyOffset, setDailyOffset] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -160,6 +193,12 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
   }, [characterId, period])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!loading) {
+      onQuestsRemainingChange?.(Math.max(0, DAILY_QUEST_LIMIT - totalQuestsToday))
+    }
+  }, [totalQuestsToday, loading, onQuestsRemainingChange])
 
   const handleQuestToggle = useCallback(
     async (tribeKey: string, bit: number, value: boolean) => {
@@ -281,7 +320,7 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
         <div>
           <p className="text-sm font-semibold">Beast Tribes</p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Rank up and track your 3 daily quests per tribe
+            Track your 3 daily quests per tribe — {DAILY_QUEST_LIMIT} total across all tribes
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -297,25 +336,36 @@ export function BeastTribeGrid({ characterId }: { characterId: string }) {
       {/* Expansion columns */}
       <div className="overflow-x-auto pb-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full">
         <div className="flex gap-4 min-w-max">
-          {DISPLAY_GROUPS.map((group) => {
-            const tribes = BEAST_TRIBES.filter((t) => t.displayGroup === group.id)
+          {visibleGroups.map((group) => {
+            const tribes = visibleTribes.filter((t) => t.displayGroup === group.id)
             return (
               <div key={group.id} className="flex flex-col gap-3 w-[200px]">
                 <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   {group.label}
                 </p>
-                {tribes.map((tribe) => (
-                  <TribeCard
-                    key={tribe.key}
-                    tribe={tribe}
-                    progress={progressMap[tribe.key]}
-                    period={period}
-                    totalQuestsToday={totalQuestsToday}
-                    onQuestToggle={handleQuestToggle}
-                    onRankUp={handleRankUp}
-                    onRankDown={handleRankDown}
-                  />
-                ))}
+                {tribes.map((tribe) => {
+                  // Allied unlock requires all other tribes in this expansion to be at Sworn (ranks.length - 1)
+                  const expansionPeers = BEAST_TRIBES.filter(
+                    (t) => t.displayGroup === tribe.displayGroup && t.key !== tribe.key
+                  )
+                  const canReachAllied = expansionPeers.every((t) => {
+                    const prog = progressMap[t.key]
+                    return (prog?.rank_level ?? 1) >= t.ranks.length - 1
+                  })
+                  return (
+                    <TribeCard
+                      key={tribe.key}
+                      tribe={tribe}
+                      progress={progressMap[tribe.key]}
+                      period={period}
+                      totalQuestsToday={totalQuestsToday}
+                      canReachAllied={canReachAllied}
+                      onQuestToggle={handleQuestToggle}
+                      onRankUp={handleRankUp}
+                      onRankDown={handleRankDown}
+                    />
+                  )
+                })}
               </div>
             )
           })}

@@ -12,6 +12,7 @@ npm run build        # Production build (runs tsc + next build)
 npm run lint         # ESLint
 npm run test:e2e     # Playwright E2E tests (headless)
 npm run test:e2e:ui  # Playwright with interactive UI
+npx playwright test --grep "test name"  # Run a single E2E test by name
 npx tsc --noEmit     # Type-check only, no emit
 ```
 
@@ -37,19 +38,23 @@ Middleware at `src/middleware.ts` protects `/dashboard`, `/character/*`, `/setti
 
 **Lodestone scraping** (`src/lib/ffxiv/lodestone-card.ts`) uses `cheerio` — server-only. Never import this file from a client component. Shared constants (job roles, display order) live in `src/lib/ffxiv/ffxiv-jobs.ts` which is client-safe. The scraper fetches four pages in parallel: main profile, `/class_job/`, `/mount/`, `/minion/`. Scraped data is cached as JSONB in `character_card_settings.lodestone_data` with a 24-hour TTL.
 
-**Image proxy** at `/api/image-proxy` proxies Lodestone CDN images (`img2.finalfantasyxiv.com`, `img.finalfantasyxiv.com`, `lds-img.finalfantasyxiv.com`) with `Access-Control-Allow-Origin: *` — required because html-to-image uses canvas which blocks cross-origin images. Any new Lodestone image hostname must be added to both this route's allowlist and `next.config.ts` `remotePatterns`.
+**Portrait uploads** use Supabase Storage (bucket `card-portraits`). The client crops an image via `PortraitCropModal.tsx`, POSTs to `/api/character/[id]/card-portrait`, which uploads to storage and writes the public URL to `character_card_settings.custom_portrait_url`. Storage CDN URLs (`*.supabase.co`) are listed in `next.config.ts` `remotePatterns` but do NOT go through the image proxy.
+
+**Image proxy** at `/api/image-proxy` proxies Lodestone CDN images (`img2.finalfantasyxiv.com`, `img.finalfantasyxiv.com`, `lds-img.finalfantasyxiv.com`) with `Access-Control-Allow-Origin: *` — required because html-to-image uses canvas which blocks cross-origin images. Any new Lodestone hostname must be added to both this route's allowlist and `next.config.ts` `remotePatterns`. Supabase Storage URLs do not need the proxy.
 
 **Character card export** uses `html-to-image` `toPng` at 2× pixel ratio (produces 1800×1000px). The card component is fixed at 900×500px and scaled to the viewport using a `ResizeObserver` in `CardGeneratorClient.tsx`.
 
 ## Database Schema (Supabase)
 
-Six migrations in `supabase/migrations/`:
+Eight migrations in `supabase/migrations/`:
 - `001` — `characters`, `checklist_items`, `checklist_state`, `push_subscriptions`, `notification_preferences` + RLS
 - `002` — seeds checklist items (seeded data lives in `src/lib/ffxiv/checklist.ts`)
 - `003` — `beast_tribe_progress` table
 - `004` — deduplication of roulette checklist items
 - `005` — `custom_deliveries_progress` table
 - `006` — `character_card_settings` table (card accent color, toggle flags, cached Lodestone JSONB, custom portrait URL)
+- `007` — Supabase Storage bucket `card-portraits` for custom portrait uploads, with RLS
+- `008` — opens `checklist_items` to anonymous reads (required for guest/unauthenticated dashboard view)
 
 **RLS pattern:** `character_card_settings` and similar tables use a `user_id uuid` column with `user_id = auth.uid()` for RLS. Subquery-based RLS (`character_id IN (SELECT id FROM characters WHERE user_id = auth.uid())`) can silently fail in Supabase — avoid it for insert/upsert policies. Always include `user_id: user.id` in upsert payloads for tables that use direct-column RLS.
 
@@ -71,4 +76,5 @@ SUPABASE_SERVICE_ROLE_KEY   # push notification sends only
 VAPID_PUBLIC_KEY
 VAPID_PRIVATE_KEY
 VAPID_SUBJECT               # mailto: address
+CRON_SECRET                 # authenticates Vercel cron calls to /api/push/send
 ```

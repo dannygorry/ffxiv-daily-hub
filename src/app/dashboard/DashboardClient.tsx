@@ -21,6 +21,7 @@ import { BeastTribeGrid } from "@/components/BeastTribeGrid"
 import { CustomDeliveriesGrid } from "@/components/CustomDeliveriesGrid"
 import { SpoilerDropdown } from "@/components/SpoilerDropdown"
 import { getDailyResetPeriod, getWeeklyResetPeriod } from "@/lib/ffxiv/resets"
+import { PriorityWidget } from "@/components/PriorityWidget"
 import { createClient } from "@/lib/supabase/client"
 import { SUBCATEGORY_LABELS } from "@/lib/ffxiv/checklist"
 import { useSpoilerSettings } from "@/hooks/useSpoilerSettings"
@@ -91,6 +92,8 @@ export function DashboardClient({
   const [completedItems, setCompletedItems] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [resetKey, setResetKey] = useState(0)
+  const [beastTribesRemaining, setBeastTribesRemaining] = useState<number | null>(null)
+  const [deliveriesRemaining, setDeliveriesRemaining] = useState<number | null>(null)
 
   const dailyPeriod = getDailyResetPeriod()
   const weeklyPeriod = getWeeklyResetPeriod()
@@ -125,6 +128,16 @@ export function DashboardClient({
     if (isGuest) return
     localStorage.setItem("ffxiv-hub-active-char", activeCharId)
   }, [activeCharId, isGuest])
+
+  useEffect(() => {
+    if (!isGuest) {
+      setBeastTribesRemaining(null)
+      setDeliveriesRemaining(null)
+    }
+  }, [activeCharId, isGuest])
+
+  const handleBeastTribesRemaining = useCallback((r: number) => setBeastTribesRemaining(r), [])
+  const handleDeliveriesRemaining = useCallback((r: number) => setDeliveriesRemaining(r), [])
 
   async function toggleItem(itemId: string, category: "daily" | "weekly") {
     const period = category === "daily" ? dailyPeriod : weeklyPeriod
@@ -245,6 +258,12 @@ export function DashboardClient({
     completedItems.has(`${i.id}:${weeklyPeriod}`)
   ).length
 
+  const MINI_CACTPOT_NAMES = ["Mini Cactpot 1/3", "Mini Cactpot 2/3", "Mini Cactpot 3/3"]
+  const miniCactpotRemaining = dailyItems
+    .filter((i) => MINI_CACTPOT_NAMES.includes(i.name))
+    .filter((i) => !completedItems.has(`${i.id}:${dailyPeriod}`))
+    .length
+
   return (
     <div className="space-y-6">
       {/* Guest banner */}
@@ -330,6 +349,14 @@ export function DashboardClient({
       )}
 
       <ResetTimers />
+
+      <PriorityWidget
+        dailyRemaining={dailyItems.length - dailyCompleted}
+        weeklyRemaining={weeklyItems.length - weeklyCompleted}
+        miniCactpotRemaining={miniCactpotRemaining}
+        beastTribesRemaining={isGuest ? null : beastTribesRemaining}
+        deliveriesRemaining={isGuest ? null : deliveriesRemaining}
+      />
 
       {isDebug && (
         <div className="flex items-center gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/5 px-3 py-2">
@@ -433,12 +460,20 @@ export function DashboardClient({
 
         {!isGuest && (
           <>
-            <TabsContent value="tribes" className="mt-4">
-              <BeastTribeGrid key={resetKey} characterId={activeCharId} />
+            <TabsContent value="tribes" forceMount className="mt-4 data-[state=inactive]:hidden">
+              <BeastTribeGrid
+                key={resetKey}
+                characterId={activeCharId}
+                onQuestsRemainingChange={handleBeastTribesRemaining}
+              />
             </TabsContent>
 
-            <TabsContent value="deliveries" className="mt-4">
-              <CustomDeliveriesGrid key={resetKey} characterId={activeCharId} />
+            <TabsContent value="deliveries" forceMount className="mt-4 data-[state=inactive]:hidden">
+              <CustomDeliveriesGrid
+                key={resetKey}
+                characterId={activeCharId}
+                onDeliveriesRemainingChange={handleDeliveriesRemaining}
+              />
             </TabsContent>
           </>
         )}

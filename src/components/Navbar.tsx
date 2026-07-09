@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Settings, Users, LayoutDashboard } from "lucide-react"
 import { NavbarSpoilerButton } from "@/components/NavbarSpoilerButton"
 import { SignOutMenuItem } from "@/components/SignOutMenuItem"
+import { MobileNav } from "@/components/MobileNav"
 
 export async function Navbar() {
   const supabase = await createClient()
@@ -38,6 +39,12 @@ export async function Navbar() {
             className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
           >
             Dashboard
+          </Link>
+          <Link
+            href="/ocean-fishing"
+            className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
+          >
+            Ocean Fishing
           </Link>
           {user && (
             <Link
@@ -83,7 +90,7 @@ export async function Navbar() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="hidden md:flex items-center gap-2">
               <Button variant="ghost" size="sm" asChild>
                 <Link href="/auth/login">Sign In</Link>
               </Button>
@@ -92,6 +99,9 @@ export async function Navbar() {
               </Button>
             </div>
           )}
+          <div className="flex md:hidden">
+            <MobileNav isLoggedIn={!!user} />
+          </div>
         </div>
       </div>
     </header>

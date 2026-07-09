@@ -56,15 +56,15 @@ export const DAILY_ITEMS: Omit<ChecklistItem, "id" | "is_active">[] = [
 
 export const WEEKLY_ITEMS: Omit<ChecklistItem, "id" | "is_active">[] = [
   // Raids
-  { name: "Alliance Raid (Tomestone Bonus)", description: "Weekly tomestone bonus from alliance raid", category: "weekly", subcategory: "raids", sort_order: 10 },
-  { name: "Normal Raid: Floor 1", description: "Weekly loot lockout", category: "weekly", subcategory: "raids", sort_order: 20 },
-  { name: "Normal Raid: Floor 2", description: "Weekly loot lockout", category: "weekly", subcategory: "raids", sort_order: 30 },
-  { name: "Normal Raid: Floor 3", description: "Weekly loot lockout", category: "weekly", subcategory: "raids", sort_order: 40 },
-  { name: "Normal Raid: Floor 4", description: "Weekly loot lockout", category: "weekly", subcategory: "raids", sort_order: 50 },
-  { name: "Savage Raid: Floor 1", description: "Weekly loot lockout", category: "weekly", subcategory: "raids", sort_order: 60 },
-  { name: "Savage Raid: Floor 2", description: "Weekly loot lockout", category: "weekly", subcategory: "raids", sort_order: 70 },
-  { name: "Savage Raid: Floor 3", description: "Weekly loot lockout", category: "weekly", subcategory: "raids", sort_order: 80 },
-  { name: "Savage Raid: Floor 4", description: "Weekly loot lockout", category: "weekly", subcategory: "raids", sort_order: 90 },
+  { name: "Windhurst: The Third Walk", description: "Weekly tomestone bonus from alliance raid", category: "weekly", subcategory: "raids", sort_order: 10 },
+  { name: "AAC Heavyweight M1", description: "Vamp Fatale", category: "weekly", subcategory: "raids", sort_order: 20 },
+  { name: "AAC Heavyweight M2", description: "Red Hot and Deep Blue", category: "weekly", subcategory: "raids", sort_order: 30 },
+  { name: "AAC Heavyweight M3", description: "The Tyrant", category: "weekly", subcategory: "raids", sort_order: 40 },
+  { name: "AAC Heavyweight M4", description: "Lindwurm", category: "weekly", subcategory: "raids", sort_order: 50 },
+  { name: "AAC Heavyweight M1 (Savage)", description: "M9S · Vamp Fatale", category: "weekly", subcategory: "raids", sort_order: 60 },
+  { name: "AAC Heavyweight M2 (Savage)", description: "M10S · Red Hot and Deep Blue", category: "weekly", subcategory: "raids", sort_order: 70 },
+  { name: "AAC Heavyweight M3 (Savage)", description: "M11S · The Tyrant", category: "weekly", subcategory: "raids", sort_order: 80 },
+  { name: "AAC Heavyweight M4 (Savage)", description: "M12S · Lindwurm", category: "weekly", subcategory: "raids", sort_order: 90 },
   // Cactpot
   { name: "Jumbo Cactpot", description: "Buy a Jumbo Cactpot ticket (drawn Saturday 20:00 JST)", category: "weekly", subcategory: "cactpot", sort_order: 200 },
   // Other
