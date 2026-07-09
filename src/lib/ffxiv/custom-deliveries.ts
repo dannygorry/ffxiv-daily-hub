@@ -1,4 +1,5 @@
 export const DELIVERIES_PER_CLIENT = 6
+export const WEEKLY_DELIVERY_CAP = 12
 
 export interface CustomDeliveryClient {
   key: string

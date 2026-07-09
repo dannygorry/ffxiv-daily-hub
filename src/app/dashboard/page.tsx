@@ -1,8 +1,20 @@
+import type { Metadata } from "next"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/server"
 import { DashboardClient } from "./DashboardClient"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
+
+export const metadata: Metadata = {
+  title: "Dashboard",
+  description:
+    "Your FFXIV daily and weekly checklist. Track duty roulettes, beast tribes, raids, Cactpot and more — per character, resets automatically at server time.",
+  openGraph: {
+    title: "FFXIV Dashboard — Daily & Weekly Checklist",
+    description: "Check off your dailies and weeklies. Automatic reset tracking per character.",
+    url: "https://ffxiv-hub.app/dashboard",
+  },
+}
 
 export default async function DashboardPage() {
   const supabase = await createClient()

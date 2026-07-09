@@ -8,12 +8,15 @@ import {
   CUSTOM_DELIVERY_CLIENTS,
   DISPLAY_GROUPS,
   DELIVERIES_PER_CLIENT,
+  WEEKLY_DELIVERY_CAP,
   SATISFACTION_COLORS,
   SATISFACTION_LABELS,
   maskToDeliveryCount,
   type CustomDeliveryClient,
 } from "@/lib/ffxiv/custom-deliveries"
 import { getWeeklyResetPeriod } from "@/lib/ffxiv/resets"
+import { useSpoilerSettings } from "@/hooks/useSpoilerSettings"
+import { isExpansionHidden, type ExpansionId } from "@/lib/spoiler"
 
 interface ClientProgress {
   client_key: string
@@ -56,12 +59,17 @@ function ClientCard({
       <div className="flex items-start justify-between gap-2">
         <div className="space-y-2 min-w-0">
           <p className="text-sm font-semibold leading-tight">{client.name}</p>
-          <span className={cn(
-            "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
-            satisfactionColor
-          )}>
-            {satisfactionLabel}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className={cn(
+              "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
+              satisfactionColor
+            )}>
+              {satisfactionLabel}
+            </span>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {progress.satisfaction_level}/{client.maxSatisfaction}
+            </span>
+          </div>
         </div>
         <div className="flex flex-col gap-1 shrink-0">
           <Button
@@ -115,8 +123,22 @@ function ClientCard({
 
 // ─── Main grid ────────────────────────────────────────────────────────────────
 
-export function CustomDeliveriesGrid({ characterId }: { characterId: string }) {
+export function CustomDeliveriesGrid({
+  characterId,
+  onDeliveriesRemainingChange,
+}: {
+  characterId: string
+  onDeliveriesRemainingChange?: (remaining: number) => void
+}) {
   const period = getWeeklyResetPeriod()
+  const { hidden } = useSpoilerSettings()
+  const visibleClients = CUSTOM_DELIVERY_CLIENTS.filter(
+    (c) => !isExpansionHidden(c.expansion as ExpansionId, hidden)
+  )
+  const visibleGroups = DISPLAY_GROUPS.filter((g) =>
+    visibleClients.some((c) => c.displayGroup === g.id)
+  )
+
   const [progressMap, setProgressMap] = useState<Record<string, ClientProgress>>({})
   const [loading, setLoading] = useState(true)
 
@@ -143,6 +165,18 @@ export function CustomDeliveriesGrid({ characterId }: { characterId: string }) {
   }, [characterId, period])
 
   useEffect(() => { load() }, [load])
+
+  const totalDeliveriesDone = visibleClients.reduce((sum, client) => {
+    const prog = progressMap[client.key]
+    const currentMask = prog?.delivery_period === period ? (prog.deliveries_mask ?? 0) : 0
+    return sum + maskToDeliveryCount(currentMask)
+  }, 0)
+
+  useEffect(() => {
+    if (!loading) {
+      onDeliveriesRemainingChange?.(Math.max(0, WEEKLY_DELIVERY_CAP - totalDeliveriesDone))
+    }
+  }, [totalDeliveriesDone, loading, onDeliveriesRemainingChange])
 
   const handleDeliveryToggle = useCallback(
     async (clientKey: string, bit: number, value: boolean) => {
@@ -228,10 +262,10 @@ export function CustomDeliveriesGrid({ characterId }: { characterId: string }) {
       {/* Expansion columns */}
       <div className="overflow-x-auto pb-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full">
         <div className="flex gap-4">
-          {DISPLAY_GROUPS.map((group) => {
-            const clients = CUSTOM_DELIVERY_CLIENTS.filter((c) => c.displayGroup === group.id)
+          {visibleGroups.map((group) => {
+            const clients = visibleClients.filter((c) => c.displayGroup === group.id)
             return (
-              <div key={group.id} className="flex flex-col gap-3 flex-1 min-w-[200px]">
+              <div key={group.id} className="flex flex-col gap-3 w-[240px]">
                 <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   {group.label}
                 </p>

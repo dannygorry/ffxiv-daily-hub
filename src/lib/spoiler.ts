@@ -157,17 +157,19 @@ export const ITEM_EXPANSION: Partial<Record<string, ExpansionId>> = {
   // update LATEST_PATCH_ID above when a new patch drops new Expert dungeons
   "Expert": LATEST_PATCH_ID,
   "Level Cap Dungeons": LATEST_PATCH_ID,
-  "Normal Raid: Floor 1": "dt",
-  "Normal Raid: Floor 2": "dt",
-  "Normal Raid: Floor 3": "dt",
-  "Normal Raid: Floor 4": "dt",
-  "Savage Raid: Floor 1": "dt",
-  "Savage Raid: Floor 2": "dt",
-  "Savage Raid: Floor 3": "dt",
-  "Savage Raid: Floor 4": "dt",
   // DT 7.1
   "Beast Tribe: Moblins": "dt71",
-  "Alliance Raid (Tomestone Bonus)": "dt71",
+  // DT 7.4
+  "AAC Heavyweight M1": "dt74",
+  "AAC Heavyweight M2": "dt74",
+  "AAC Heavyweight M3": "dt74",
+  "AAC Heavyweight M4": "dt74",
+  "AAC Heavyweight M1 (Savage)": "dt74",
+  "AAC Heavyweight M2 (Savage)": "dt74",
+  "AAC Heavyweight M3 (Savage)": "dt74",
+  "AAC Heavyweight M4 (Savage)": "dt74",
+  // DT 7.5
+  "Windhurst: The Third Walk": "dt75",
 }
 
 export function isExpansionHidden(

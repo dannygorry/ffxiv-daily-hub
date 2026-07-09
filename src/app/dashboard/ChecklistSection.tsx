@@ -102,7 +102,7 @@ function SubcategoryGroup({
   const itemIds = items.map((i) => i.id)
 
   return (
-    <Card className={cn("border-border", allDone && "opacity-60")}>
+    <Card className={cn("border-border gap-0 py-0", allDone && "opacity-60")}>
       <CardHeader className="py-3 px-4">
         <div className="flex items-center gap-2">
           <button
@@ -174,7 +174,7 @@ function SubcategoryGroup({
                     <p className={cn("text-sm font-medium", done && "line-through text-muted-foreground")}>
                       {item.name}
                     </p>
-                    {item.description && (
+                    {item.description?.trim() && (
                       <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
                     )}
                   </div>
