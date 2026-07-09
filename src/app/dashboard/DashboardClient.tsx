@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react"
+import { ArrowRight, ChevronDown, ChevronRight, RotateCcw } from "lucide-react"
 import { EorzeaClock } from "@/components/EorzeaClock"
 import { ResetTimers } from "@/components/ResetTimers"
 import { ChecklistSection } from "./ChecklistSection"
@@ -67,10 +67,12 @@ export function DashboardClient({
   characters,
   checklistItems,
   isGuest = false,
+  isDebug = false,
 }: {
   characters: Character[]
   checklistItems: ChecklistItem[]
   isGuest?: boolean
+  isDebug?: boolean
 }) {
   const primaryChar = characters.find((c) => c.is_primary) ?? characters[0]
   const [activeTab, setActiveTab] = useState("daily")
@@ -194,6 +196,32 @@ export function DashboardClient({
     }
   }
 
+  async function handleDebugReset(type: "daily" | "weekly") {
+    const period = type === "daily" ? dailyPeriod : weeklyPeriod
+
+    setCompletedItems((prev) => {
+      const next = new Set(prev)
+      for (const key of next) {
+        if (key.endsWith(`:${period}`)) next.delete(key)
+      }
+      return next
+    })
+
+    if (isGuest) {
+      const next = new Set(completedItems)
+      for (const key of next) {
+        if (key.endsWith(`:${period}`)) next.delete(key)
+      }
+      saveGuestState(next)
+      return
+    }
+
+    await fetch(
+      `/api/debug/reset-period?period=${encodeURIComponent(period)}&characterId=${activeCharId}`,
+      { method: "DELETE" }
+    )
+  }
+
   const { hidden, toggleExpansion, togglePatch, getExpansionState } = useSpoilerSettings()
 
   const dailyItems = checklistItems.filter(
@@ -298,6 +326,28 @@ export function DashboardClient({
       )}
 
       <ResetTimers />
+
+      {isDebug && (
+        <div className="flex items-center gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/5 px-3 py-2">
+          <span className="text-xs text-yellow-500 font-mono font-semibold mr-1">DEBUG</span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 h-7 text-xs border-yellow-500/40 text-yellow-400 hover:text-yellow-300"
+            onClick={() => handleDebugReset("daily")}
+          >
+            <RotateCcw className="size-3" /> Reset Dailies
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 h-7 text-xs border-yellow-500/40 text-yellow-400 hover:text-yellow-300"
+            onClick={() => handleDebugReset("weekly")}
+          >
+            <RotateCcw className="size-3" /> Reset Weeklies
+          </Button>
+        </div>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full sm:w-auto">

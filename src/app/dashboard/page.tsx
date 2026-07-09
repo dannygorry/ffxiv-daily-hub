@@ -4,6 +4,11 @@ import { DashboardClient } from "./DashboardClient"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 
+const DEBUG_EMAILS = (process.env.DEBUG_EMAILS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean)
+
 export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -27,6 +32,8 @@ export default async function DashboardPage() {
       </div>
     )
   }
+
+  const isDebug = DEBUG_EMAILS.length > 0 && DEBUG_EMAILS.includes(user.email ?? "")
 
   const { data: characters } = await supabase
     .from("characters")
@@ -69,6 +76,7 @@ export default async function DashboardPage() {
         <DashboardClient
           characters={verifiedCharacters}
           checklistItems={checklistItems ?? []}
+          isDebug={isDebug}
         />
       </main>
     </div>
