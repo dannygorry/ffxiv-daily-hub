@@ -8,11 +8,6 @@ export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const debugEmails = (process.env.DEBUG_EMAILS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-
   const { data: checklistItems } = await supabase
     .from("checklist_items")
     .select("*")
@@ -33,7 +28,7 @@ export default async function DashboardPage() {
     )
   }
 
-  const isDebug = debugEmails.length > 0 && debugEmails.includes(user.email ?? "")
+  const isDebug = process.env.NODE_ENV === "development"
 
   const { data: characters } = await supabase
     .from("characters")
