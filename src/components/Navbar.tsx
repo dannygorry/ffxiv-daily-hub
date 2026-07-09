@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Settings, Users, LayoutDashboard, CreditCard } from "lucide-react"
+import { Settings, Users, LayoutDashboard } from "lucide-react"
 import { NavbarSpoilerButton } from "@/components/NavbarSpoilerButton"
 import { SignOutMenuItem } from "@/components/SignOutMenuItem"
 
@@ -34,12 +34,20 @@ export async function Navbar() {
             Home
           </Link>
           {user && (
-            <Link
-              href="/dashboard"
-              className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
-            >
-              Dashboard
-            </Link>
+            <>
+              <Link
+                href="/dashboard"
+                className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/character/card"
+                className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
+              >
+                Card Maker
+              </Link>
+            </>
           )}
         </nav>
 
@@ -65,11 +73,6 @@ export async function Navbar() {
                 <DropdownMenuItem asChild>
                   <Link href="/character/manage" className="flex items-center gap-2">
                     <Users className="size-4" /> Characters
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/character/card" className="flex items-center gap-2">
-                    <CreditCard className="size-4" /> Card Generator
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
