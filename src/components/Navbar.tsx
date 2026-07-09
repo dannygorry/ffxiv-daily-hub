@@ -19,14 +19,14 @@ export async function Navbar() {
 
   return (
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-4 relative">
         <Link href="/" className="flex items-center gap-2 shrink-0">
           <span className="text-primary font-bold text-lg tracking-tight">
             ⚔️ FFXIV Hub
           </span>
         </Link>
 
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden md:flex items-center gap-1 absolute left-1/2 -translate-x-1/2">
           <Link
             href="/"
             className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
