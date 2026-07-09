@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
-import { Navbar } from "@/components/Navbar"
 import { CardGeneratorClient } from "./CardGeneratorClient"
 
 export default async function CardGeneratorPage({
@@ -23,7 +22,6 @@ export default async function CardGeneratorPage({
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Navbar />
       <main className="flex-1 w-full px-4 py-8">
         <div className="max-w-7xl mx-auto space-y-6">
           <div>

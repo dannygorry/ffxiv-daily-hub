@@ -1,5 +1,4 @@
 import Link from "next/link"
-import { Navbar } from "@/components/Navbar"
 import { EorzeaClock } from "@/components/EorzeaClock"
 import { ResetTimers } from "@/components/ResetTimers"
 import { WeatherWidget } from "@/components/WeatherWidget"
@@ -12,8 +11,6 @@ export default async function HomePage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Navbar />
-
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-8 space-y-10">
         {/* Hero */}
         <section className="text-center space-y-3 pt-4">

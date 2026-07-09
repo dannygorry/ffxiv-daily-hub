@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
-import { Navbar } from "@/components/Navbar"
 import { NotificationSettings } from "./NotificationSettings"
 import { ChangePasswordForm } from "./ChangePasswordForm"
 
@@ -19,7 +18,6 @@ export default async function SettingsPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Navbar />
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-8 space-y-8">
         <div>
           <h1 className="text-2xl font-bold">Settings</h1>

@@ -1,6 +1,5 @@
 import { notFound, redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
-import { Navbar } from "@/components/Navbar"
 import { VerifyCharacterClient } from "./VerifyCharacterClient"
 
 export default async function VerifyPage({ params }: { params: Promise<{ id: string }> }) {
@@ -21,7 +20,6 @@ export default async function VerifyPage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Navbar />
       <main className="flex-1 max-w-xl mx-auto w-full px-4 py-8">
         <VerifyCharacterClient character={character} />
       </main>

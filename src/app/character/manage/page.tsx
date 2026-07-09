@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/server"
-import { Navbar } from "@/components/Navbar"
 import { CharacterManageClient } from "./CharacterManageClient"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
@@ -19,7 +18,6 @@ export default async function ManageCharactersPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Navbar />
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-8 space-y-6">
         <div className="flex items-center justify-between">
           <div>
