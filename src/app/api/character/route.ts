@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 })
   }
 
-  const verificationCode = randomBytes(4).toString("hex").toUpperCase()
+  const verificationCode = "XIVHUB:" + randomBytes(6).toString("hex").toUpperCase()
 
   // Check if this lodestone ID is already linked to another account
   const { data: existing } = await supabase

@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ChevronUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   BEAST_TRIBES,
@@ -51,38 +50,40 @@ function TribeCard({
 
   return (
     <div className="rounded-lg border border-border bg-card/60 p-3.5 space-y-3 min-w-0">
-      {/* Name + rank controls */}
+      {/* Name + badge on left, rank controls on right */}
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-semibold leading-tight">{tribe.name}</p>
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={() => onRankDown(tribe.key)}
-            disabled={isMinRank}
-            title="Rank down"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 rounded hover:bg-secondary/50"
+        <div className="space-y-2 min-w-0">
+          <p className="text-sm font-semibold leading-tight">{tribe.name}</p>
+          <span
+            className={cn(
+              "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
+              RANK_COLORS[rankName] ?? "bg-secondary text-secondary-foreground"
+            )}
           >
-            <ChevronUp className="size-4 rotate-180" />
-          </button>
-          <button
+            {rankName}
+          </span>
+        </div>
+        <div className="flex flex-col gap-1 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => onRankUp(tribe.key)}
             disabled={isMaxRank}
-            title="Rank up"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 rounded hover:bg-secondary/50"
+            className="h-6 px-1.5 text-[10px]"
           >
-            <ChevronUp className="size-4" />
-          </button>
+            Rank +
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onRankDown(tribe.key)}
+            disabled={isMinRank}
+            className="h-6 px-1.5 text-[10px]"
+          >
+            Rank −
+          </Button>
         </div>
       </div>
-
-      {/* Rank badge */}
-      <span
-        className={cn(
-          "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
-          RANK_COLORS[rankName] ?? "bg-secondary text-secondary-foreground"
-        )}
-      >
-        {rankName}
-      </span>
 
       {/* Quest checkboxes */}
       <div className="flex items-center gap-4">

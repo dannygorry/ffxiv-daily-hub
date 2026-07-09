@@ -9,8 +9,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { LogOut, Settings, Users, LayoutDashboard } from "lucide-react"
+import { Settings, Users, LayoutDashboard, CreditCard } from "lucide-react"
 import { NavbarSpoilerButton } from "@/components/NavbarSpoilerButton"
+import { SignOutMenuItem } from "@/components/SignOutMenuItem"
 
 export async function Navbar() {
   const supabase = await createClient()
@@ -67,21 +68,17 @@ export async function Navbar() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
+                  <Link href="/character/card" className="flex items-center gap-2">
+                    <CreditCard className="size-4" /> Card Generator
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
                   <Link href="/settings" className="flex items-center gap-2">
                     <Settings className="size-4" /> Settings
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <form action="/api/auth/signout" method="post">
-                    <button
-                      type="submit"
-                      className="flex items-center gap-2 w-full text-left text-destructive"
-                    >
-                      <LogOut className="size-4" /> Sign Out
-                    </button>
-                  </form>
-                </DropdownMenuItem>
+                <SignOutMenuItem />
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
