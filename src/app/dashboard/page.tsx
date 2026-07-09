@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/server"
 import { DashboardClient } from "./DashboardClient"
@@ -8,7 +7,26 @@ import { Plus } from "lucide-react"
 export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect("/auth/login")
+
+  const { data: checklistItems } = await supabase
+    .from("checklist_items")
+    .select("*")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+
+  if (!user) {
+    return (
+      <div className="flex flex-col min-h-screen">
+        <main className="flex-1 w-full max-w-[1400px] mx-auto px-6 py-6">
+          <DashboardClient
+            characters={[]}
+            checklistItems={checklistItems ?? []}
+            isGuest
+          />
+        </main>
+      </div>
+    )
+  }
 
   const { data: characters } = await supabase
     .from("characters")
@@ -18,16 +36,10 @@ export default async function DashboardPage() {
 
   const verifiedCharacters = (characters ?? []).filter((c) => c.verified)
 
-  const { data: checklistItems } = await supabase
-    .from("checklist_items")
-    .select("*")
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true })
-
   if (!verifiedCharacters.length) {
     return (
       <div className="flex flex-col min-h-screen">
-          <main className="flex-1 flex flex-col items-center justify-center px-4 text-center space-y-4">
+        <main className="flex-1 flex flex-col items-center justify-center px-4 text-center space-y-4">
           <div className="text-4xl">⚔️</div>
           <h1 className="text-2xl font-bold">No characters linked yet</h1>
           <p className="text-muted-foreground max-w-sm">
