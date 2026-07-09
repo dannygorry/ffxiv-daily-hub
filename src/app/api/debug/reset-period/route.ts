@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
-const DEBUG_EMAILS = (process.env.DEBUG_EMAILS ?? "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean)
-
 export async function DELETE(req: NextRequest) {
-  if (DEBUG_EMAILS.length === 0) {
+  const debugEmails = (process.env.DEBUG_EMAILS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  if (debugEmails.length === 0) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user || !DEBUG_EMAILS.includes(user.email ?? "")) {
+  if (!user || !debugEmails.includes(user.email ?? "")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
