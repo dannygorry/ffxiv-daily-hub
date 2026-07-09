@@ -2,11 +2,14 @@ import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { Navbar } from "@/components/Navbar"
 import { NotificationSettings } from "./NotificationSettings"
+import { ChangePasswordForm } from "./ChangePasswordForm"
 
 export default async function SettingsPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect("/auth/login")
+
+  const hasPasswordIdentity = user.identities?.some((i) => i.provider === "email") ?? false
 
   const { data: prefs } = await supabase
     .from("notification_preferences")
@@ -22,6 +25,11 @@ export default async function SettingsPage() {
           <h1 className="text-2xl font-bold">Settings</h1>
           <p className="text-muted-foreground text-sm mt-1">Manage your account preferences</p>
         </div>
+
+        <section className="space-y-3">
+          <h2 className="text-base font-semibold">Password</h2>
+          <ChangePasswordForm hasPasswordIdentity={hasPasswordIdentity} />
+        </section>
 
         <section className="space-y-3">
           <h2 className="text-base font-semibold">Push Notifications</h2>

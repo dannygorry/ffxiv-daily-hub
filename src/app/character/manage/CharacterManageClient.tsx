@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import { Star, Trash2, ShieldCheck, Clock, Plus } from "lucide-react"
+import { Star, Trash2, ShieldCheck, Clock, Plus, CreditCard } from "lucide-react"
 
 interface Character {
   id: string
@@ -96,6 +96,13 @@ export function CharacterManageClient({ characters: initial }: { characters: Cha
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {char.verified && (
+                <Button size="sm" variant="outline" asChild className="gap-1.5">
+                  <Link href={`/character/card?char=${char.id}`}>
+                    <CreditCard className="size-3.5" /> Card
+                  </Link>
+                </Button>
+              )}
               {!char.verified && (
                 <Button size="sm" variant="outline" asChild>
                   <Link href={`/character/verify/${char.id}`}>Verify</Link>

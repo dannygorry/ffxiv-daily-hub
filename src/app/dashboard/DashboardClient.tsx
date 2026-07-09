@@ -9,13 +9,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react"
 import { EorzeaClock } from "@/components/EorzeaClock"
 import { ResetTimers } from "@/components/ResetTimers"
 import { ChecklistSection } from "./ChecklistSection"
 import { BeastTribeGrid } from "@/components/BeastTribeGrid"
+import { CustomDeliveriesGrid } from "@/components/CustomDeliveriesGrid"
 import { SpoilerDropdown } from "@/components/SpoilerDropdown"
 import { getDailyResetPeriod, getWeeklyResetPeriod } from "@/lib/ffxiv/resets"
 import { createClient } from "@/lib/supabase/client"
@@ -54,13 +56,15 @@ export function DashboardClient({
   checklistItems: ChecklistItem[]
 }) {
   const primaryChar = characters.find((c) => c.is_primary) ?? characters[0]
-  const [activeCharId, setActiveCharId] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("ffxiv-hub-active-char")
-      if (stored && characters.find((c) => c.id === stored)) return stored
+  const [activeTab, setActiveTab] = useState("daily")
+  const [activeCharId, setActiveCharId] = useState<string>(primaryChar.id)
+
+  useEffect(() => {
+    const stored = localStorage.getItem("ffxiv-hub-active-char")
+    if (stored && characters.find((c) => c.id === stored)) {
+      setActiveCharId(stored)
     }
-    return primaryChar.id
-  })
+  }, [])
   const activeChar = characters.find((c) => c.id === activeCharId) ?? primaryChar
 
   const [completedItems, setCompletedItems] = useState<Set<string>>(new Set())
@@ -234,7 +238,7 @@ export function DashboardClient({
 
       <ResetTimers />
 
-      <Tabs defaultValue="daily">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full sm:w-auto">
           <TabsTrigger value="daily" className="flex-1 sm:flex-none gap-2">
             Daily
@@ -251,6 +255,9 @@ export function DashboardClient({
           <TabsTrigger value="tribes" className="flex-1 sm:flex-none">
             Beast Tribes
           </TabsTrigger>
+          <TabsTrigger value="deliveries" className="flex-1 sm:flex-none">
+            Custom Deliveries
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="daily" className="mt-4">
@@ -264,6 +271,17 @@ export function DashboardClient({
             onToggleMany={toggleMany}
             subcategoryLabels={SUBCATEGORY_LABELS}
           />
+          <Card className="mt-3 border-border">
+            <CardContent className="flex items-center justify-between py-3 px-4">
+              <div>
+                <p className="text-sm font-semibold">Beast Tribes</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Track your daily quests and rank progress</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setActiveTab("tribes")} className="gap-1.5 shrink-0">
+                View <ArrowRight className="size-3.5" />
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="weekly" className="mt-4">
@@ -277,10 +295,25 @@ export function DashboardClient({
             onToggleMany={toggleMany}
             subcategoryLabels={SUBCATEGORY_LABELS}
           />
+          <Card className="mt-3 border-border">
+            <CardContent className="flex items-center justify-between py-3 px-4">
+              <div>
+                <p className="text-sm font-semibold">Custom Deliveries</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Track your 6 weekly deliveries per client</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setActiveTab("deliveries")} className="gap-1.5 shrink-0">
+                View <ArrowRight className="size-3.5" />
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="tribes" className="mt-4">
           <BeastTribeGrid characterId={activeCharId} />
+        </TabsContent>
+
+        <TabsContent value="deliveries" className="mt-4">
+          <CustomDeliveriesGrid characterId={activeCharId} />
         </TabsContent>
       </Tabs>
     </div>
