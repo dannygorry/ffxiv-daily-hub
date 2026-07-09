@@ -90,6 +90,7 @@ export function DashboardClient({
 
   const [completedItems, setCompletedItems] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [resetKey, setResetKey] = useState(0)
 
   const dailyPeriod = getDailyResetPeriod()
   const weeklyPeriod = getWeeklyResetPeriod()
@@ -217,9 +218,12 @@ export function DashboardClient({
     }
 
     await fetch(
-      `/api/debug/reset-period?period=${encodeURIComponent(period)}&characterId=${activeCharId}`,
+      `/api/debug/reset-period?period=${encodeURIComponent(period)}&characterId=${activeCharId}&type=${type}`,
       { method: "DELETE" }
     )
+
+    // Force beast tribe / custom delivery grids to remount and re-fetch
+    setResetKey((k) => k + 1)
   }
 
   const { hidden, toggleExpansion, togglePatch, getExpansionState } = useSpoilerSettings()
@@ -430,11 +434,11 @@ export function DashboardClient({
         {!isGuest && (
           <>
             <TabsContent value="tribes" className="mt-4">
-              <BeastTribeGrid characterId={activeCharId} />
+              <BeastTribeGrid key={resetKey} characterId={activeCharId} />
             </TabsContent>
 
             <TabsContent value="deliveries" className="mt-4">
-              <CustomDeliveriesGrid characterId={activeCharId} />
+              <CustomDeliveriesGrid key={resetKey} characterId={activeCharId} />
             </TabsContent>
           </>
         )}

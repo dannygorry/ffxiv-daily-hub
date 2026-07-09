@@ -8,17 +8,15 @@ export async function DELETE(req: NextRequest) {
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
   const period = searchParams.get("period")
   const characterId = searchParams.get("characterId")
+  const type = searchParams.get("type") as "daily" | "weekly" | null
 
-  if (!period || !characterId) {
-    return NextResponse.json({ error: "Missing period or characterId" }, { status: 400 })
+  if (!period || !characterId || !type) {
+    return NextResponse.json({ error: "Missing period, characterId or type" }, { status: 400 })
   }
 
   const { data: character } = await supabase
@@ -28,15 +26,37 @@ export async function DELETE(req: NextRequest) {
     .eq("user_id", user.id)
     .single()
 
-  if (!character) {
-    return NextResponse.json({ error: "Character not found" }, { status: 404 })
-  }
+  if (!character) return NextResponse.json({ error: "Character not found" }, { status: 404 })
 
+  // Clear checklist state for this period
   await supabase
     .from("checklist_state")
     .delete()
     .eq("character_id", characterId)
     .eq("reset_period", period)
+
+  if (type === "daily") {
+    // Reset beast tribe daily quests by clearing quest_period (makes them appear unchecked)
+    await supabase
+      .from("beast_tribe_progress")
+      .update({ quests_mask: 0, quest_period: "" })
+      .eq("character_id", characterId)
+
+    // Clear daily offset tracking
+    await supabase
+      .from("beast_tribe_daily_offset")
+      .delete()
+      .eq("character_id", characterId)
+      .eq("period", period)
+  }
+
+  if (type === "weekly") {
+    // Reset custom delivery weekly masks by clearing delivery_period
+    await supabase
+      .from("custom_delivery_progress")
+      .update({ deliveries_mask: 0, delivery_period: "" })
+      .eq("character_id", characterId)
+  }
 
   return NextResponse.json({ ok: true })
 }
