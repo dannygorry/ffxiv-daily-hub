@@ -10,6 +10,9 @@ export async function POST(req: NextRequest) {
   if (!characterId || tribeKey == null || questMask == null || !period) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 })
   }
+  if (typeof questMask !== "number" || !Number.isInteger(questMask) || questMask < 0 || questMask > 7) {
+    return NextResponse.json({ error: "Invalid questMask" }, { status: 400 })
+  }
 
   const { data: character } = await supabase
     .from("characters").select("id").eq("id", characterId).eq("user_id", user.id).single()

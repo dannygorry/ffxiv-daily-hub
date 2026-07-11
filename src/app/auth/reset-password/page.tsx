@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,23 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => {
+    const supabase = createClient()
+    // Accept only a PASSWORD_RECOVERY event; a plain logged-in session is not
+    // sufficient — the user must have arrived via the reset link.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") return // allow
+      // Any other event (SIGNED_IN from a normal session, SIGNED_OUT, etc.)
+      // means this isn't a fresh recovery flow — redirect away.
+      if (event !== "INITIAL_SESSION") router.replace("/auth/forgot-password")
+    })
+    // Fallback: if no session at all after mount, redirect
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) router.replace("/auth/forgot-password")
+    })
+    return () => subscription.unsubscribe()
+  }, [router])
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (password !== confirm) {
@@ -23,14 +40,17 @@ export default function ResetPasswordPage() {
     }
     setError("")
     setLoading(true)
-    const supabase = createClient()
-    const { error } = await supabase.auth.updateUser({ password })
-    if (error) {
-      setError(error.message)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.auth.updateUser({ password })
+      if (error) {
+        setError(error.message)
+      } else {
+        router.push("/dashboard")
+        router.refresh()
+      }
+    } finally {
       setLoading(false)
-    } else {
-      router.push("/dashboard")
-      router.refresh()
     }
   }
 

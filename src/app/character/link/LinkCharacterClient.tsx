@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { DATA_CENTERS, REGIONS, type XIVAPICharacterResult } from "@/lib/ffxiv/xivapi"
 import { Button } from "@/components/ui/button"
@@ -28,6 +28,7 @@ export function LinkCharacterClient() {
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState("")
   const [linking, setLinking] = useState<number | null>(null)
+  const linkingRef = useRef(false)
 
   function handleDcChange(value: string) {
     setDc(value === "__any" ? "" : value)
@@ -60,6 +61,8 @@ export function LinkCharacterClient() {
   }
 
   async function handleSelect(char: XIVAPICharacterResult) {
+    if (linkingRef.current) return
+    linkingRef.current = true
     setLinking(char.ID)
     setError("")
     try {
@@ -80,6 +83,7 @@ export function LinkCharacterClient() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add character.")
       setLinking(null)
+      linkingRef.current = false
     }
   }
 

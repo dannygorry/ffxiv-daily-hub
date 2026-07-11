@@ -61,6 +61,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       showMounts: settings?.show_mounts ?? true,
       showMinions: settings?.show_minions ?? true,
       showEureka: settings?.show_eureka ?? false,
+      showRelicProgress: settings?.show_relic_progress ?? false,
     },
   })
 }
@@ -76,11 +77,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const body = await req.json()
   const patch: Record<string, unknown> = { character_id: id, user_id: user.id, updated_at: new Date().toISOString() }
-  if (body.cardAccentColor !== undefined) patch.card_accent_color = body.cardAccentColor
+  if (body.cardAccentColor !== undefined) {
+    if (!/^#[0-9a-fA-F]{6}$/.test(body.cardAccentColor)) {
+      return NextResponse.json({ error: "Invalid cardAccentColor" }, { status: 400 })
+    }
+    patch.card_accent_color = body.cardAccentColor
+  }
   if (body.showJobGrid !== undefined) patch.show_job_grid = body.showJobGrid
   if (body.showMounts !== undefined) patch.show_mounts = body.showMounts
   if (body.showMinions !== undefined) patch.show_minions = body.showMinions
   if (body.showEureka !== undefined) patch.show_eureka = body.showEureka
+  if (body.showRelicProgress !== undefined) patch.show_relic_progress = body.showRelicProgress
 
   const { error } = await supabase
     .from("character_card_settings")

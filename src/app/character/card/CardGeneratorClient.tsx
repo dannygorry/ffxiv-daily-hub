@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toPng } from "html-to-image"
-import { CharacterCard, type CardSettings } from "@/components/CharacterCard"
+import { CharacterCard, type CardSettings, type RelicProgressData } from "@/components/CharacterCard"
+import { RELIC_TRACKS } from "@/lib/ffxiv/relics"
 import { PortraitCropModal } from "@/components/PortraitCropModal"
 import type { LodestoneCardData } from "@/lib/ffxiv/lodestone-card"
 import { Button } from "@/components/ui/button"
@@ -32,6 +33,28 @@ const DEFAULT_SETTINGS: CardSettings = {
   showMounts: true,
   showMinions: true,
   showEureka: false,
+  showRelicProgress: false,
+}
+
+function computeRelicProgress(rows: { expansion_key: string; category: string; job_key: string; completed_steps: string[] }[]): RelicProgressData {
+  const map: Record<string, string[]> = {}
+  for (const r of rows) map[`${r.expansion_key}:${r.category}:${r.job_key}`] = r.completed_steps
+  function pct(tracks: typeof RELIC_TRACKS) {
+    let done = 0, total = 0
+    for (const t of tracks) {
+      for (const j of t.jobs) {
+        done += (map[`${t.expansionKey}:${t.category}:${j.key}`] ?? []).length
+        total += t.steps.length
+      }
+    }
+    return total > 0 ? Math.round((done / total) * 100) : 0
+  }
+  return {
+    overall: pct(RELIC_TRACKS),
+    weapons: pct(RELIC_TRACKS.filter((t) => t.category === "weapon")),
+    armor:   pct(RELIC_TRACKS.filter((t) => t.category === "armor")),
+    tools:   pct(RELIC_TRACKS.filter((t) => t.category === "tool")),
+  }
 }
 
 type FetchStatus = "idle" | "loading" | "error"
@@ -48,6 +71,7 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [cardScale, setCardScale] = useState(1)
+  const [relicProgress, setRelicProgress] = useState<RelicProgressData | null>(null)
 
   // Local color tracks the picker swatch/hex display instantly.
   // patchSettings is debounced so CharacterCard only re-renders ~every 80ms.
@@ -58,7 +82,9 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
   const previewWrapperRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Scale the 900×600 card to fit the available width
+  // Scale the 1080×600 card to fit the available width.
+  // Must depend on lodestoneData: the wrapper div doesn't render until data
+  // is loaded, so previewWrapperRef.current is null on first mount.
   useEffect(() => {
     const el = previewWrapperRef.current
     if (!el) return
@@ -68,11 +94,11 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [lodestoneData])
 
-  const loadCardData = useCallback(async (id: string): Promise<"ok" | "error"> => {
+  const loadCardData = useCallback(async (id: string, signal?: AbortSignal): Promise<"ok" | "error"> => {
     try {
-      const res = await fetch(`/api/character/${id}/card-data`)
+      const res = await fetch(`/api/character/${id}/card-data`, { signal })
       if (!res.ok) throw new Error((await res.json()).error ?? "Failed to load")
       const { lodestoneData: ld, cardSettings: cs } = await res.json()
       setLodestoneData(ld)
@@ -80,6 +106,7 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
       setLocalAccentColor(cs.cardAccentColor ?? DEFAULT_SETTINGS.cardAccentColor)
       return "ok"
     } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return "ok"
       setError(e instanceof Error ? e.message : "Failed to load character data")
       return "error"
     }
@@ -87,13 +114,38 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
 
   useEffect(() => {
     if (!selectedId) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    const controller = new AbortController()
     setFetchStatus("loading")
     setError(null)
-    loadCardData(selectedId).then((result) => {
-      setFetchStatus(result === "ok" ? "idle" : "error")
+    loadCardData(selectedId, controller.signal).then((result) => {
+      if (!controller.signal.aborted) {
+        setFetchStatus(result === "ok" ? "idle" : "error")
+      }
     })
+    return () => controller.abort()
   }, [selectedId, loadCardData])
+
+  useEffect(() => {
+    return () => {
+      if (colorDebounceRef.current) clearTimeout(colorDebounceRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!settings.showRelicProgress || !selectedId) {
+      setRelicProgress(null)
+      return
+    }
+    const controller = new AbortController()
+    fetch(`/api/relic-tracker?characterId=${selectedId}`, { signal: controller.signal })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (!data) return
+        setRelicProgress(computeRelicProgress(data.progress ?? []))
+      })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [settings.showRelicProgress, selectedId])
 
   async function handleRefresh() {
     if (!selectedId) return
@@ -106,25 +158,36 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
       setLodestoneData(ld)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Refresh failed")
+    } finally {
+      setRefreshing(false)
     }
-    setRefreshing(false)
   }
 
   async function handleSaveSettings() {
     if (!selectedId) return
     setSaving(true)
-    await fetch(`/api/character/${selectedId}/card-data`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        cardAccentColor: settings.cardAccentColor,
-        showJobGrid: settings.showJobGrid,
-        showMounts: settings.showMounts,
-        showMinions: settings.showMinions,
-        showEureka: settings.showEureka,
-      }),
-    })
-    setSaving(false)
+    try {
+      const res = await fetch(`/api/character/${selectedId}/card-data`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cardAccentColor: settings.cardAccentColor,
+          showJobGrid: settings.showJobGrid,
+          showMounts: settings.showMounts,
+          showMinions: settings.showMinions,
+          showEureka: settings.showEureka,
+          showRelicProgress: settings.showRelicProgress,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data.error ?? "Failed to save settings")
+      }
+    } catch {
+      setError("Network error — settings not saved")
+    } finally {
+      setSaving(false)
+    }
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -170,9 +233,20 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
   async function handleRemovePortrait() {
     if (!selectedId) return
     setUploading(true)
-    await fetch(`/api/character/${selectedId}/card-portrait`, { method: "DELETE" })
-    setSettings((s) => ({ ...s, customPortraitUrl: null }))
-    setUploading(false)
+    setError(null)
+    try {
+      const res = await fetch(`/api/character/${selectedId}/card-portrait`, { method: "DELETE" })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data.error ?? "Failed to remove portrait")
+        return
+      }
+      setSettings((s) => ({ ...s, customPortraitUrl: null }))
+    } catch {
+      setError("Network error — portrait not removed")
+    } finally {
+      setUploading(false)
+    }
   }
 
   async function handleExport() {
@@ -221,6 +295,7 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
       settings.showMounts,
       settings.showMinions,
       settings.showEureka,
+      settings.showRelicProgress,
     ]
   )
 
@@ -294,7 +369,7 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
               }}
             >
               <div ref={cardRef}>
-                <CharacterCard data={lodestoneData} settings={previewSettings} />
+                <CharacterCard data={lodestoneData} settings={previewSettings} relicProgress={relicProgress} />
               </div>
             </div>
           </div>
@@ -350,6 +425,7 @@ export function CardGeneratorClient({ characters, initialCharId }: Props) {
                 ["showMounts", "Show mounts"],
                 ["showMinions", "Show minions"],
                 ["showEureka", "Show Eureka / Bozja"],
+                ["showRelicProgress", "Show relic progress"],
               ] as Array<[keyof CardSettings, string]>
             ).map(([key, label]) => (
               <label key={key} className="flex items-center gap-2 cursor-pointer">

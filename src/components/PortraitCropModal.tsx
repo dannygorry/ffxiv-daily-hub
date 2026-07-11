@@ -46,6 +46,7 @@ export function PortraitCropModal({ imageSrc, onCancel, onConfirm }: Props) {
   const [zoom, setZoom] = useState(1)
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null)
   const [applying, setApplying] = useState(false)
+  const [cropError, setCropError] = useState<string | null>(null)
 
   const onCropComplete = useCallback((_: Area, pixels: Area) => {
     setCroppedAreaPixels(pixels)
@@ -54,10 +55,12 @@ export function PortraitCropModal({ imageSrc, onCancel, onConfirm }: Props) {
   async function handleConfirm() {
     if (!croppedAreaPixels) return
     setApplying(true)
+    setCropError(null)
     try {
       const blob = await cropToBlob(imageSrc, croppedAreaPixels)
       onConfirm(blob)
     } catch {
+      setCropError("Failed to crop image. Please try again.")
       setApplying(false)
     }
   }
@@ -119,6 +122,10 @@ export function PortraitCropModal({ imageSrc, onCancel, onConfirm }: Props) {
             {zoom.toFixed(1)}×
           </span>
         </div>
+
+        {cropError && (
+          <p style={{ fontSize: 12, color: "#f87171", margin: 0 }}>{cropError}</p>
+        )}
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>

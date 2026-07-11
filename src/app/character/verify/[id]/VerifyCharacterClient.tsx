@@ -29,14 +29,19 @@ export function VerifyCharacterClient({ character }: { character: Character }) {
   async function verify() {
     setVerifying(true)
     setError("")
-    const res = await fetch(`/api/character/${character.id}/verify`, { method: "POST" })
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data.error)
+    try {
+      const res = await fetch(`/api/character/${character.id}/verify`, { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? "Verification failed")
+      } else {
+        router.push("/character/manage")
+        router.refresh()
+      }
+    } catch {
+      setError("Network error — please try again")
+    } finally {
       setVerifying(false)
-    } else {
-      router.push("/character/manage")
-      router.refresh()
     }
   }
 

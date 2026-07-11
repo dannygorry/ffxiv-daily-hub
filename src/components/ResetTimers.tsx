@@ -49,7 +49,8 @@ export function ResetTimers() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
       {TIMERS.map(({ label, emoji, getNext, color }) => {
-        const ms = now ? getNext().getTime() - now.getTime() : 0
+        const next = now ? getNext() : null
+        const ms = next && now ? next.getTime() - now.getTime() : 0
         return (
           <Card key={label} className="bg-card border-border">
             <CardContent className="py-4 px-5 flex flex-col items-center gap-1">
@@ -57,11 +58,11 @@ export function ResetTimers() {
                 {emoji} {label}
               </span>
               <span className={`font-mono text-xl font-bold tabular-nums ${color}`}>
-                {now ? formatCountdown(ms) : "--:--:--"}
+                {next ? formatCountdown(ms) : "--:--:--"}
               </span>
               <span className="text-xs text-muted-foreground">
-                {now
-                  ? getNext().toLocaleString(undefined, {
+                {next
+                  ? next.toLocaleString(undefined, {
                       weekday: "short",
                       hour: "2-digit",
                       minute: "2-digit",

@@ -28,6 +28,8 @@ import { ChevronDown, ChevronRight, Plus, ExternalLink } from "lucide-react"
 import {
   EXPANSION_TABS,
   TOOL_TRACKS,
+  ARMOR_GEAR_SETS,
+  ARMOR_SLOT_NAMES,
   getExpansionTracks,
   getProgressPercent,
   getTrack,
@@ -35,7 +37,7 @@ import {
   type RelicTrack,
   type RelicMaterial,
 } from "@/lib/ffxiv/relics"
-import { JOB_ROLES, type JobRole } from "@/lib/ffxiv/ffxiv-jobs"
+import { JOB_ROLES, JOB_CLASS_IDS, JOB_ABBREVIATIONS, type JobRole } from "@/lib/ffxiv/ffxiv-jobs"
 import { RelicOverview } from "./RelicOverview"
 
 interface Character {
@@ -149,8 +151,54 @@ function JobPill({
   )
 }
 
-// Group a job list by role, preserving order within each group
 type RelicJob = RelicTrack["jobs"][number]
+
+const GEAR_SET_ROLE: Record<string, JobRole> = {
+  Fending: "tank",
+  Healing: "healer",
+  Maiming: "melee",
+  Striking: "melee",
+  Scouting: "melee",
+  Aiming: "physical_ranged",
+  Casting: "magical_ranged",
+}
+
+const ARMOR_GEAR_SET_ICON_JOB: Record<string, string> = {
+  Fending: "Paladin",
+  Healing: "White Mage",
+  Maiming: "Dragoon",
+  Striking: "Monk",
+  Scouting: "Ninja",
+  Aiming: "Bard",
+  Casting: "Black Mage",
+}
+
+function ArmorJobIcon({ jobName }: { jobName: string }) {
+  const id = JOB_CLASS_IDS[jobName]
+  const [failed, setFailed] = useState(false)
+  if (!id || failed) {
+    return (
+      <span className="text-[9px] font-bold block text-center">
+        {JOB_ABBREVIATIONS[jobName] ?? jobName.slice(0, 3).toUpperCase()}
+      </span>
+    )
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`https://xivapi.com/i/062000/${String(62100 + id).padStart(6, "0")}.png`}
+      alt={jobName}
+      width={20}
+      height={20}
+      className="mx-auto rounded"
+      style={{ width: 20, height: 20 }}
+      title={jobName}
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
+// Group a job list by role, preserving order within each group
 function groupJobsByRole(jobs: RelicJob[]): { role: JobRole | "none"; label: string; jobs: RelicJob[] }[] {
   const order: (JobRole | "none")[] = ["tank", "healer", "melee", "physical_ranged", "magical_ranged", "crafter", "gatherer", "limited", "none"]
   const map = new Map<JobRole | "none", RelicJob[]>()
@@ -164,7 +212,7 @@ function groupJobsByRole(jobs: RelicJob[]): { role: JobRole | "none"; label: str
     .map((r) => ({ role: r, label: ROLE_META[r].label, jobs: map.get(r)! }))
 }
 
-// ─── Job dropdown ─────────────────────────────────────────────────────────────
+// ─── Job dropdown (weapons / tools) ──────────────────────────────────────────
 
 function JobSelect({
   jobs,
@@ -183,18 +231,20 @@ function JobSelect({
   steps: { key: string }[]
   onSelect: (jobKey: string) => void
 }) {
-  const groups = groupJobsByRole(jobs)
+  const selectedJob_obj = jobs.find((j) => j.key === selectedJob)
+  const selectedLabel = selectedJob_obj?.label ?? (selectedJob || "Select…")
   const selectedPercent = (() => {
     const raw = progressMap[progressKey(expansionKey, category, selectedJob)] ?? []
     return getProgressPercent(effectiveCompleted(raw, steps), steps as RelicTrack["steps"])
   })()
+  const roleGroups = groupJobsByRole(jobs)
 
   return (
     <Select value={selectedJob} onValueChange={onSelect}>
       <SelectTrigger className="w-full sm:w-72">
         <SelectValue>
           <span className="flex items-center gap-2">
-            <span>{selectedJob || "Select a job…"}</span>
+            <span>{selectedLabel}</span>
             {selectedJob && (
               <span className={cn(
                 "text-xs tabular-nums",
@@ -207,7 +257,7 @@ function JobSelect({
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
-        {groups.map((group, i) => (
+        {roleGroups.map((group, i) => (
           <SelectGroup key={group.role}>
             {i > 0 && <SelectSeparator />}
             {group.label && (
@@ -225,10 +275,7 @@ function JobSelect({
                 <SelectItem key={job.key} value={job.key}>
                   <span className="flex items-center gap-2">
                     <span className={cn(roleText, done && "line-through opacity-50")}>{job.label}</span>
-                    <span className={cn(
-                      "text-xs tabular-nums ml-auto pl-4",
-                      done ? "text-emerald-500" : "text-muted-foreground"
-                    )}>
+                    <span className={cn("text-xs tabular-nums ml-auto pl-4", done ? "text-emerald-500" : "text-muted-foreground")}>
                       {done ? "✓" : `${pct}%`}
                     </span>
                   </span>
@@ -239,6 +286,138 @@ function JobSelect({
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+// ─── Armor slot dropdown ──────────────────────────────────────────────────────
+
+function ArmorSlotSelect({
+  selectedSlot,
+  progressMap,
+  expansionKey,
+  steps,
+  onSelect,
+}: {
+  selectedSlot: string
+  progressMap: ProgressMap
+  expansionKey: string
+  steps: { key: string }[]
+  onSelect: (slot: string) => void
+}) {
+  return (
+    <Select value={selectedSlot} onValueChange={onSelect}>
+      <SelectTrigger className="w-full sm:w-72">
+        <SelectValue>
+          {selectedSlot ? selectedSlot.charAt(0).toUpperCase() + selectedSlot.slice(1) : "Select piece…"}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {ARMOR_SLOT_NAMES.map((slot) => {
+          const slotKey = slot.toLowerCase()
+          const gearSetJobKeys = ARMOR_GEAR_SETS.map((gs) => `${gs.toLowerCase()}_${slotKey}`)
+          const setsComplete = gearSetJobKeys.filter((key) => {
+            const raw = progressMap[progressKey(expansionKey, "armor", key)] ?? []
+            return effectiveCompleted(raw, steps).length === steps.length
+          }).length
+          const done = setsComplete === ARMOR_GEAR_SETS.length
+          return (
+            <SelectItem key={slotKey} value={slotKey}>
+              <span className="flex items-center gap-2">
+                <span className={cn(done && "line-through opacity-50")}>{slot}</span>
+                <span className={cn("text-xs tabular-nums ml-auto pl-4", done ? "text-emerald-500" : "text-muted-foreground")}>
+                  {done ? "✓" : `${setsComplete}/${ARMOR_GEAR_SETS.length} sets`}
+                </span>
+              </span>
+            </SelectItem>
+          )
+        })}
+      </SelectContent>
+    </Select>
+  )
+}
+
+// ─── Armor step table (7 gear-set columns) ────────────────────────────────────
+
+function ArmorStepTable({
+  track,
+  slotKey,
+  progressMap,
+  onToggle,
+}: {
+  track: RelicTrack
+  slotKey: string
+  progressMap: ProgressMap
+  onToggle: (jobKey: string, stepKey: string, completed: boolean) => void
+}) {
+  const stages: { stageName: string; steps: typeof track.steps }[] = []
+  for (const step of track.steps) {
+    const last = stages[stages.length - 1]
+    if (last && last.stageName === step.stage) {
+      last.steps.push(step)
+    } else {
+      stages.push({ stageName: step.stage, steps: [step] })
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border">
+      <table className="border-collapse text-xs min-w-full">
+        <thead className="sticky top-14 z-20">
+          <tr className="bg-muted border-b border-border">
+            <th className="text-left px-3 py-2 font-semibold text-muted-foreground whitespace-nowrap min-w-[180px] sticky left-0 bg-muted z-10">
+              Step
+            </th>
+            {ARMOR_GEAR_SETS.map((gs) => {
+              const role = GEAR_SET_ROLE[gs] ?? "none"
+              return (
+                <th key={gs} className="px-2 py-2 text-center min-w-[64px]">
+                  <div className="flex flex-col items-center gap-0.5">
+                    <ArmorJobIcon jobName={ARMOR_GEAR_SET_ICON_JOB[gs]} />
+                    <span className={cn("text-[9px] font-medium", ROLE_META[role].text)}>
+                      {gs}
+                    </span>
+                  </div>
+                </th>
+              )
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {stages.flatMap((stage) => [
+            <tr key={`hdr-${stage.stageName}`}>
+              <td
+                colSpan={1 + ARMOR_GEAR_SETS.length}
+                className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 bg-muted/20 border-t-2 border-border"
+              >
+                {stage.stageName}
+              </td>
+            </tr>,
+            ...stage.steps.map((step) => (
+              <tr key={step.key} className="border-t border-border/20 hover:bg-muted/10">
+                <td className="px-3 py-2.5 text-xs text-foreground/80 whitespace-nowrap sticky left-0 bg-card z-10 border-r border-border/20">
+                  {step.label}
+                </td>
+                {ARMOR_GEAR_SETS.map((gs) => {
+                  const jobKey = `${gs.toLowerCase()}_${slotKey}`
+                  const raw = progressMap[progressKey(track.expansionKey, track.category, jobKey)] ?? []
+                  const eff = effectiveCompleted(raw, track.steps)
+                  const done = eff.includes(step.key)
+                  return (
+                    <td key={gs} className="px-2 py-2.5 text-center">
+                      <Checkbox
+                        checked={done}
+                        onCheckedChange={(checked) => onToggle(jobKey, step.key, !!checked)}
+                        className={cn(done && "border-emerald-500 data-[state=checked]:bg-emerald-500")}
+                      />
+                    </td>
+                  )
+                })}
+              </tr>
+            )),
+          ])}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -479,11 +658,13 @@ function HeldInput({
   onChange: (v: number) => void
 }) {
   const [local, setLocal] = useState(String(value))
+  const [focused, setFocused] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Only sync from prop when not focused — avoids clobbering keystrokes mid-debounce
   useEffect(() => {
-    setLocal(String(value))
-  }, [value])
+    if (!focused) setLocal(String(value))
+  }, [value, focused])
 
   const handleChange = (raw: string) => {
     setLocal(raw)
@@ -500,6 +681,8 @@ function HeldInput({
       min={0}
       value={local}
       onChange={(e) => handleChange(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => { setFocused(false); setLocal(String(value)) }}
       className="h-7 w-20 text-right text-xs px-2 ml-auto"
     />
   )
@@ -531,18 +714,23 @@ function ExpansionPanel({
   const [activeJob, setActiveJob] = useState<string>("")
 
   const currentTrack = tracks.find((t) => t.category === activeCategory) ?? tracks[0]
+  const isArmorCategory = currentTrack?.category === "armor"
 
   useEffect(() => {
-    if (currentTrack) setActiveJob(currentTrack.jobs[0]?.key ?? "")
+    if (currentTrack) {
+      setActiveJob(currentTrack.category === "armor" ? "head" : (currentTrack.jobs[0]?.key ?? ""))
+    }
   }, [currentTrack?.expansionKey, currentTrack?.category, characterId])
 
   if (!currentTrack) return null
 
-  const selectedJob = activeJob || currentTrack.jobs[0]?.key || ""
-  const completedSteps = effectiveCompleted(
-    progressMap[progressKey(expansionKey, activeCategory, selectedJob)] ?? [],
-    currentTrack.steps
-  )
+  const selectedJob = activeJob || (isArmorCategory ? "head" : currentTrack.jobs[0]?.key || "")
+  const completedSteps = !isArmorCategory
+    ? effectiveCompleted(
+        progressMap[progressKey(expansionKey, activeCategory, selectedJob)] ?? [],
+        currentTrack.steps
+      )
+    : []
 
   return (
     <div className="space-y-4">
@@ -569,17 +757,46 @@ function ExpansionPanel({
         <p className="text-sm text-muted-foreground">{currentTrack.categoryLabel}</p>
       )}
 
-      <JobSelect
-        jobs={currentTrack.jobs}
-        selectedJob={selectedJob}
-        progressMap={progressMap}
-        expansionKey={expansionKey}
-        category={activeCategory}
-        steps={currentTrack.steps}
-        onSelect={setActiveJob}
-      />
+      {isArmorCategory ? (
+        <ArmorSlotSelect
+          selectedSlot={selectedJob}
+          progressMap={progressMap}
+          expansionKey={expansionKey}
+          steps={currentTrack.steps}
+          onSelect={setActiveJob}
+        />
+      ) : (
+        <JobSelect
+          jobs={currentTrack.jobs}
+          selectedJob={selectedJob}
+          progressMap={progressMap}
+          expansionKey={expansionKey}
+          category={activeCategory}
+          steps={currentTrack.steps}
+          onSelect={setActiveJob}
+        />
+      )}
 
-      {selectedJob && (
+      {selectedJob && isArmorCategory && (
+        <div className="space-y-4">
+          <ArmorStepTable
+            track={currentTrack}
+            slotKey={selectedJob}
+            progressMap={progressMap}
+            onToggle={(jobKey, stepKey, completed) =>
+              onToggle(expansionKey, activeCategory, jobKey, stepKey, completed)
+            }
+          />
+          <MaterialsPanel
+            track={currentTrack}
+            progressMap={progressMap}
+            heldMap={heldMap}
+            onHeldChange={(matKey, v) => onHeldChange(expansionKey, activeCategory, matKey, v)}
+          />
+        </div>
+      )}
+
+      {selectedJob && !isArmorCategory && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {/* Left: step checklist */}
           <div className="rounded-lg border border-border bg-card p-4">
@@ -799,19 +1016,34 @@ export function RelicTrackerClient({ characters }: { characters: Character[] }) 
       latestRef.current = { ...latestRef.current, [key]: next }
       setProgressMap((p) => ({ ...p, [key]: next }))
 
-      const results = await Promise.all(
-        writes.map(({ stepKey: sk, completed: c }) =>
-          fetch("/api/relic-tracker", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ characterId: activeCharId, expansionKey, category, jobKey, stepKey: sk, completed: c }),
-          })
-        )
-      )
+      // Sequential writes — avoids TOCTOU between concurrent requests for the same job.
+      // On any failure, re-fetch server state so the UI reflects what actually committed.
+      let failed = false
+      for (const { stepKey: sk, completed: c } of writes) {
+        const res = await fetch("/api/relic-tracker", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ characterId: activeCharId, expansionKey, category, jobKey, stepKey: sk, completed: c }),
+        })
+        if (!res.ok) { failed = true; break }
+      }
 
-      if (results.some((r) => !r.ok)) {
-        latestRef.current = { ...latestRef.current, [key]: prev }
-        setProgressMap((p) => ({ ...p, [key]: prev }))
+      if (failed) {
+        const refetchRes = await fetch(`/api/relic-tracker?characterId=${activeCharId}`)
+        if (refetchRes.ok) {
+          const { progress } = await refetchRes.json() as {
+            progress: { expansion_key: string; category: string; job_key: string; completed_steps: string[] }[]
+          }
+          const serverEntry = progress.find(
+            (r) => r.expansion_key === expansionKey && r.category === category && r.job_key === jobKey
+          )
+          const serverSteps = serverEntry?.completed_steps ?? prev
+          latestRef.current = { ...latestRef.current, [key]: serverSteps }
+          setProgressMap((p) => ({ ...p, [key]: serverSteps }))
+        } else {
+          latestRef.current = { ...latestRef.current, [key]: prev }
+          setProgressMap((p) => ({ ...p, [key]: prev }))
+        }
       } else {
         committedRef.current = { ...committedRef.current, [key]: next }
       }
@@ -822,9 +1054,10 @@ export function RelicTrackerClient({ characters }: { characters: Character[] }) 
   const handleHeldChange = useCallback(
     async (expansionKey: string, category: string, materialKey: string, value: number) => {
       const key = heldKey(expansionKey, category, materialKey)
-      setHeldMap((p) => ({ ...p, [key]: value }))
+      let prev = 0
+      setHeldMap((p) => { prev = p[key] ?? 0; return { ...p, [key]: value } })
 
-      await fetch("/api/relic-materials", {
+      const res = await fetch("/api/relic-materials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -835,6 +1068,7 @@ export function RelicTrackerClient({ characters }: { characters: Character[] }) 
           heldCount: value,
         }),
       })
+      if (!res.ok) setHeldMap((p) => ({ ...p, [key]: prev }))
     },
     [activeCharId]
   )

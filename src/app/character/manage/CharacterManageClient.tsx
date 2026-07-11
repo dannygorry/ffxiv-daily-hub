@@ -25,28 +25,49 @@ export function CharacterManageClient({ characters: initial }: { characters: Cha
   const router = useRouter()
   const [characters, setCharacters] = useState(initial)
   const [loading, setLoading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   async function setPrimary(id: string) {
     setLoading(id)
-    await fetch(`/api/character/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_primary: true }),
-    })
-    setCharacters((prev) =>
-      prev.map((c) => ({ ...c, is_primary: c.id === id }))
-    )
-    setLoading(null)
-    router.refresh()
+    setError(null)
+    try {
+      const res = await fetch(`/api/character/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_primary: true }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data.error ?? "Failed to update character")
+        return
+      }
+      setCharacters((prev) => prev.map((c) => ({ ...c, is_primary: c.id === id })))
+      router.refresh()
+    } catch {
+      setError("Network error — please try again")
+    } finally {
+      setLoading(null)
+    }
   }
 
   async function remove(id: string) {
     if (!confirm("Remove this character from your account?")) return
     setLoading(id)
-    await fetch(`/api/character/${id}`, { method: "DELETE" })
-    setCharacters((prev) => prev.filter((c) => c.id !== id))
-    setLoading(null)
-    router.refresh()
+    setError(null)
+    try {
+      const res = await fetch(`/api/character/${id}`, { method: "DELETE" })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data.error ?? "Failed to remove character")
+        return
+      }
+      setCharacters((prev) => prev.filter((c) => c.id !== id))
+      router.refresh()
+    } catch {
+      setError("Network error — please try again")
+    } finally {
+      setLoading(null)
+    }
   }
 
   if (characters.length === 0) {
@@ -64,6 +85,9 @@ export function CharacterManageClient({ characters: initial }: { characters: Cha
 
   return (
     <div className="space-y-3">
+      {error && (
+        <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
+      )}
       {characters.map((char) => (
         <Card key={char.id} className={char.is_primary ? "border-primary/50" : ""}>
           <CardContent className="flex items-center gap-4 py-4 px-4">

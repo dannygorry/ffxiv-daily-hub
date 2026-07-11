@@ -3,6 +3,7 @@ export type RelicCategory = "weapon" | "armor" | "tool"
 export interface RelicJob {
   key: string
   label: string
+  gearSet?: string  // armor only: "Fending" | "Healing" | "Maiming" | "Striking" | "Scouting" | "Aiming" | "Casting"
 }
 
 export interface RelicStep {
@@ -110,13 +111,16 @@ const DOH_DOL_JOBS: RelicJob[] = [
   { key: "Fisher", label: "Fisher" },
 ]
 
-const ARMOR_SLOTS: RelicJob[] = [
-  { key: "Head", label: "Head" },
-  { key: "Body", label: "Body" },
-  { key: "Hands", label: "Hands" },
-  { key: "Legs", label: "Legs" },
-  { key: "Feet", label: "Feet" },
-]
+export const ARMOR_GEAR_SETS = ["Fending", "Healing", "Maiming", "Striking", "Scouting", "Aiming", "Casting"] as const
+export const ARMOR_SLOT_NAMES = ["Head", "Body", "Hands", "Legs", "Feet"] as const
+
+const ARMOR_JOBS: RelicJob[] = ARMOR_GEAR_SETS.flatMap((gs) =>
+  ARMOR_SLOT_NAMES.map((slot) => ({
+    key: `${gs.toLowerCase()}_${slot.toLowerCase()}`,
+    label: slot,
+    gearSet: gs,
+  }))
+)
 
 // ─── Track definitions ───────────────────────────────────────────────────────
 
@@ -262,7 +266,7 @@ export const RELIC_TRACKS: RelicTrack[] = [
     category: "armor",
     expansionLabel: "Stormblood",
     categoryLabel: "Eurekan Armor",
-    jobs: ARMOR_SLOTS,
+    jobs: ARMOR_JOBS,
     steps: [
       { key: "anemos_base", label: "Base Armor", stage: "Anemos" },
       { key: "anemos_1", label: "Armor +1", stage: "Anemos" },
@@ -329,11 +333,13 @@ export const RELIC_TRACKS: RelicTrack[] = [
     category: "armor",
     expansionLabel: "Shadowbringers",
     categoryLabel: "Bozjan Armor",
-    jobs: ARMOR_SLOTS,
+    jobs: ARMOR_JOBS,
     steps: [
       { key: "resistance", label: "Resistance Armor", stage: "Resistance" },
       { key: "augmented", label: "Augmented Resistance", stage: "Augmented" },
       { key: "laws_order", label: "Law's Order", stage: "Law's Order" },
+      { key: "aug_laws_order", label: "Augmented Law's Order", stage: "Augmented Law's Order" },
+      { key: "blades", label: "Blade's Armor", stage: "Blade's" },
     ],
     // Amounts per armor slot — verify against the spreadsheet
     materials: [
@@ -391,7 +397,7 @@ export const RELIC_TRACKS: RelicTrack[] = [
     category: "armor",
     expansionLabel: "Dawntrail",
     categoryLabel: "Arcanaut's Armor",
-    jobs: ARMOR_SLOTS,
+    jobs: ARMOR_JOBS,
     steps: [
       { key: "base", label: "Base Armor", stage: "Base" },
       { key: "plus1", label: "Armor +1", stage: "+1" },

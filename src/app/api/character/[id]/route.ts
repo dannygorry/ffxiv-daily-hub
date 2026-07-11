@@ -17,12 +17,13 @@ export async function PATCH(
     if (key in body) update[key] = body[key]
   }
 
-  // If setting as primary, unset all others first
+  // Reverse update order: set target primary first, then demote others.
+  // This avoids a window where no character is primary (vs. the prior unset-all-then-set approach).
   if (update.is_primary === true) {
-    await supabase
-      .from("characters")
-      .update({ is_primary: false })
-      .eq("user_id", user.id)
+    await supabase.from("characters").update({ is_primary: true }).eq("id", id).eq("user_id", user.id)
+    await supabase.from("characters").update({ is_primary: false }).eq("user_id", user.id).neq("id", id)
+    delete update.is_primary
+    if (!Object.keys(update).length) return NextResponse.json({ ok: true })
   }
 
   const { error } = await supabase
