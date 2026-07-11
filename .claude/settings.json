@@ -1,8 +1,16 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(gh pr *)",
+      "WebSearch"
+    ]
+  },
   "mcpServers": {
     "playwright": {
       "command": "npx.cmd",
-      "args": ["@playwright/mcp@latest"]
+      "args": [
+        "@playwright/mcp@latest"
+      ]
     }
   }
 }
