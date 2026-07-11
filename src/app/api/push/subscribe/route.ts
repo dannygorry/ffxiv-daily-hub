@@ -11,6 +11,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid subscription" }, { status: 400 })
   }
 
+  let endpointUrl: URL
+  try {
+    endpointUrl = new URL(endpoint)
+  } catch {
+    return NextResponse.json({ error: "Invalid endpoint" }, { status: 400 })
+  }
+  if (endpointUrl.protocol !== "https:") {
+    return NextResponse.json({ error: "Invalid endpoint" }, { status: 400 })
+  }
+  const h = endpointUrl.hostname
+  const isPrivate =
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    h === "0.0.0.0" ||
+    h === "::1" ||
+    h.startsWith("10.") ||
+    h.startsWith("192.168.") ||
+    h.startsWith("169.254.") ||   // link-local
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h) // RFC-1918 172.16.0.0/12
+  if (isPrivate) {
+    return NextResponse.json({ error: "Invalid endpoint" }, { status: 400 })
+  }
+
   const { error } = await supabase.from("push_subscriptions").upsert({
     user_id: user.id,
     endpoint,

@@ -49,7 +49,9 @@ function WeatherWindowCard({ win, isCurrent }: { win: WeatherWindow; isCurrent: 
 }
 
 function ZoneWeather({ zone, now }: { zone: Zone; now: Date }) {
-  const windows = useMemo(() => getUpcomingWeather(zone, now, 4), [zone, now])
+  // Weather windows are 20 min; only recompute when the active window changes.
+  const windowEpoch = getWeatherWindowStart(now).getTime()
+  const windows = useMemo(() => getUpcomingWeather(zone, now, 4), [zone, windowEpoch]) // eslint-disable-line react-hooks/exhaustive-deps
   const currentWindowStart = getWeatherWindowStart(now)
 
   return (
@@ -103,7 +105,8 @@ export function WeatherWidget() {
     <div className="space-y-4">
       <div className="flex items-center gap-2 flex-wrap">
         {visibleDefaultZones.map((id) => {
-          const z = ZONES.find((z) => z.id === id)!
+          const z = ZONES.find((z) => z.id === id)
+          if (!z) return null
           return (
             <button
               key={z.id}

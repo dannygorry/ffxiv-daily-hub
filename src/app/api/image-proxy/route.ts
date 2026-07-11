@@ -32,7 +32,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Upstream error" }, { status: res.status })
   }
 
-  const contentType = res.headers.get("content-type") ?? "image/jpeg"
+  const rawContentType = res.headers.get("content-type") ?? "image/jpeg"
+  const contentType = rawContentType.startsWith("image/") ? rawContentType : "image/jpeg"
   const buffer = await res.arrayBuffer()
 
   return new NextResponse(buffer, {

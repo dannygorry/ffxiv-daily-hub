@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { maskToCount } from "@/lib/ffxiv/beast-tribes"
+import { maskToCount, BEAST_TRIBES } from "@/lib/ffxiv/beast-tribes"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -11,6 +11,9 @@ export async function POST(req: NextRequest) {
   if (!characterId || !tribeKey || !period) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 })
   }
+
+  const tribe = BEAST_TRIBES.find((t) => t.key === tribeKey)
+  if (!tribe) return NextResponse.json({ error: "Unknown tribe" }, { status: 400 })
 
   const { data: character } = await supabase
     .from("characters").select("id").eq("id", characterId).eq("user_id", user.id).single()
@@ -43,15 +46,23 @@ export async function POST(req: NextRequest) {
     }, { onConflict: "character_id,period" })
   }
 
-  // Increment rank and reset today's quests
-  const newRank = (current?.rank_level ?? 1) + 1
-  await supabase.from("beast_tribe_progress").upsert({
-    character_id: characterId,
-    tribe_key: tribeKey,
-    rank_level: newRank,
-    quests_mask: 0,
-    quest_period: period,
-  }, { onConflict: "character_id,tribe_key" })
+  // Increment rank and reset today's quests (capped at tribe's max rank).
+  // Use conditional UPDATE to avoid a TOCTOU race: only advance rank if the
+  // row still has the rank we just read.  If a concurrent request already
+  // incremented it, the update is a no-op (idempotent from the user's view).
+  const maxRank = tribe.ranks.length - 1
+  const currentRank = current?.rank_level ?? 1
+  if (currentRank >= maxRank) {
+    return NextResponse.json({ ok: true, newRank: currentRank })
+  }
+  const newRank = currentRank + 1
+  const { error: updateErr } = await supabase
+    .from("beast_tribe_progress")
+    .update({ rank_level: newRank, quests_mask: 0, quest_period: period })
+    .eq("character_id", characterId)
+    .eq("tribe_key", tribeKey)
+    .eq("rank_level", currentRank) // only advance if rank hasn't changed
+  if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
 
   return NextResponse.json({ ok: true, newRank })
 }

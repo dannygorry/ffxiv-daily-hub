@@ -35,7 +35,7 @@ export default async function SettingsPage() {
             Get browser notifications to remind you about time-sensitive content.
           </p>
           <NotificationSettings
-            vapidPublicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!}
+            vapidPublicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? ""}
             initialPrefs={prefs ?? {
               mini_cactpot: true,
               jumbo_cactpot: true,

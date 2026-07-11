@@ -10,6 +10,9 @@ export async function POST(req: NextRequest) {
   if (!characterId || !itemIds?.length || !resetPeriod) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 })
   }
+  if (!Array.isArray(itemIds) || itemIds.length > 200 || !itemIds.every((id) => typeof id === "string")) {
+    return NextResponse.json({ error: "Invalid itemIds" }, { status: 400 })
+  }
 
   const { data: character } = await supabase
     .from("characters")

@@ -11,6 +11,10 @@ export async function POST(req: NextRequest) {
   if (!lodestoneId || !name || !server) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 })
   }
+  const lodestoneIdNum = Number(lodestoneId)
+  if (!Number.isInteger(lodestoneIdNum) || lodestoneIdNum <= 0) {
+    return NextResponse.json({ error: "Invalid lodestoneId" }, { status: 400 })
+  }
 
   const verificationCode = "XIVHUB:" + randomBytes(6).toString("hex").toUpperCase()
 
@@ -61,6 +65,11 @@ export async function POST(req: NextRequest) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    if (error.code === "23505") {
+      return NextResponse.json({ error: "This character is already linked to another account." }, { status: 409 })
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
   return NextResponse.json(data)
 }

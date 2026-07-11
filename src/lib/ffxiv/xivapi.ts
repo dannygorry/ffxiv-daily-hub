@@ -69,8 +69,11 @@ export async function getCharacter(lodestoneId: number): Promise<XIVAPICharacter
 
   const html = await res.text()
 
-  const bioMatch = html.match(/class="character__selfintroduction">([\s\S]*?)<\/div>/)
-  const bio = bioMatch ? bioMatch[1].trim() : ""
+  // Greedy match so nested </div> tags inside the bio don't truncate the capture.
+  // The bio is user plain-text; the outer div is the first element of that class.
+  const bioMatch = html.match(/class="character__selfintroduction">([\s\S]*?)<\/p>\s*<\/div>/) ??
+                   html.match(/class="character__selfintroduction">([\s\S]*?)<\/div>/)
+  const bio = bioMatch ? bioMatch[1].replace(/<[^>]+>/g, "").trim() : ""
 
   // First Lodestone face image URL
   const avatarMatch = html.match(/src="(https:\/\/img2\.finalfantasyxiv\.com\/f\/[^"]+)"/)

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -28,14 +28,19 @@ export function NotificationSettings({
   vapidPublicKey: string
   initialPrefs: Prefs
 }) {
+  const [supported, setSupported] = useState<boolean | null>(null)
   const [permission, setPermission] = useState<NotificationPermission>("default")
   const [subscribed, setSubscribed] = useState(false)
   const [prefs, setPrefs] = useState<Prefs>(initialPrefs)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState("")
+  const pendingPrefsRef = useRef<Prefs | null>(null)
+  const savingPrefsRef = useRef(false)
 
   useEffect(() => {
-    if (!("Notification" in window)) return
+    const ok = "Notification" in window
+    setSupported(ok)
+    if (!ok) return
     setPermission(Notification.permission)
     navigator.serviceWorker.ready.then((reg) =>
       reg.pushManager.getSubscription().then((sub) => setSubscribed(!!sub))
@@ -58,11 +63,16 @@ export function NotificationSettings({
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as unknown as ArrayBuffer,
       })
 
-      await fetch("/api/push/subscribe", {
+      const res = await fetch("/api/push/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sub.toJSON()),
       })
+      if (!res.ok) {
+        await sub.unsubscribe()
+        setStatus("Failed to save subscription. Please try again.")
+        return
+      }
 
       setSubscribed(true)
       setStatus("Notifications enabled!")
@@ -75,30 +85,43 @@ export function NotificationSettings({
 
   async function disableNotifications() {
     setSaving(true)
-    const reg = await navigator.serviceWorker.ready
-    const sub = await reg.pushManager.getSubscription()
-    if (sub) {
-      await fetch("/api/push/subscribe", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint: sub.endpoint }),
-      })
-      await sub.unsubscribe()
+    try {
+      const reg = await navigator.serviceWorker.ready
+      const sub = await reg.pushManager.getSubscription()
+      if (sub) {
+        await fetch("/api/push/subscribe", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        })
+        await sub.unsubscribe()
+      }
+      setSubscribed(false)
+      setStatus("Notifications disabled.")
+    } catch {
+      setStatus("Failed to disable notifications. Please try again.")
+    } finally {
+      setSaving(false)
     }
-    setSubscribed(false)
-    setStatus("Notifications disabled.")
-    setSaving(false)
   }
 
   async function savePrefs(newPrefs: Prefs) {
     setPrefs(newPrefs)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    await supabase.from("notification_preferences").upsert({
-      user_id: user.id,
-      ...newPrefs,
-    })
+    pendingPrefsRef.current = newPrefs
+    if (savingPrefsRef.current) return
+    savingPrefsRef.current = true
+    try {
+      while (pendingPrefsRef.current) {
+        const toSave = pendingPrefsRef.current
+        pendingPrefsRef.current = null
+        const supabase = createClient()
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+        await supabase.from("notification_preferences").upsert({ user_id: user.id, ...toSave })
+      }
+    } finally {
+      savingPrefsRef.current = false
+    }
   }
 
   function togglePref(key: keyof Prefs) {
@@ -106,7 +129,9 @@ export function NotificationSettings({
     savePrefs(updated)
   }
 
-  if (!("Notification" in window) && typeof window !== "undefined") {
+  // null = still detecting (SSR / first render) → render nothing to avoid hydration mismatch
+  if (supported === null) return null
+  if (!supported) {
     return (
       <Card>
         <CardContent className="py-4">

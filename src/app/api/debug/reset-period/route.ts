@@ -13,11 +13,15 @@ export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const period = searchParams.get("period")
   const characterId = searchParams.get("characterId")
-  const type = searchParams.get("type") as "daily" | "weekly" | null
+  const rawType = searchParams.get("type")
 
-  if (!period || !characterId || !type) {
+  if (!period || !characterId || !rawType) {
     return NextResponse.json({ error: "Missing period, characterId or type" }, { status: 400 })
   }
+  if (rawType !== "daily" && rawType !== "weekly") {
+    return NextResponse.json({ error: "type must be daily or weekly" }, { status: 400 })
+  }
+  const type = rawType
 
   const { data: character } = await supabase
     .from("characters")

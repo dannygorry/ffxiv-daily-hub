@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { RELIC_TRACKS, type RelicTrack } from "@/lib/ffxiv/relics"
+import { RELIC_TRACKS, ARMOR_GEAR_SETS, type RelicTrack } from "@/lib/ffxiv/relics"
 import { JOB_ABBREVIATIONS, JOB_CLASS_IDS, JOB_ROLES, type JobRole } from "@/lib/ffxiv/ffxiv-jobs"
 
 type ProgressMap = Record<string, string[]>
@@ -146,6 +146,85 @@ const WEAPON_COLS = RELIC_TRACKS.find(
 const ARMOR_COLS = RELIC_TRACKS.find((t) => t.category === "armor")?.jobs ?? []
 const TOOL_COLS = RELIC_TRACKS.find((t) => t.category === "tool")?.jobs ?? []
 
+function calcProgress(tracks: RelicTrack[], progressMap: ProgressMap) {
+  let done = 0
+  let total = 0
+  for (const track of tracks) {
+    for (const job of track.jobs) {
+      const raw = progressMap[pKey(track.expansionKey, track.category, job.key)] ?? []
+      done += effCompleted(raw, track.steps).length
+      total += track.steps.length
+    }
+  }
+  return { done, total, pct: total > 0 ? Math.round((done / total) * 100) : 0 }
+}
+
+function ProgressBar({ pct, colorClass, height = "h-2" }: { pct: number; colorClass: string; height?: string }) {
+  return (
+    <div className={cn(height, "rounded-full bg-muted overflow-hidden")}>
+      <div
+        className={cn("h-full rounded-full transition-all duration-700", pct === 100 ? "bg-emerald-500" : colorClass)}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  )
+}
+
+function TotalProgress({ progressMap }: { progressMap: ProgressMap }) {
+  const weaponTracks = RELIC_TRACKS.filter((t) => t.category === "weapon")
+  const armorTracks  = RELIC_TRACKS.filter((t) => t.category === "armor")
+  const toolTracks   = RELIC_TRACKS.filter((t) => t.category === "tool")
+
+  const overall = calcProgress(RELIC_TRACKS, progressMap)
+  const weapons = calcProgress(weaponTracks, progressMap)
+  const armor   = calcProgress(armorTracks,  progressMap)
+  const tools   = calcProgress(toolTracks,   progressMap)
+
+  const categories = [
+    { label: "Weapons", color: "bg-sky-400",    ...weapons },
+    { label: "Armor",   color: "bg-violet-400", ...armor   },
+    { label: "Tools",   color: "bg-amber-400",  ...tools   },
+  ]
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+      {/* Header + big % */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold">Overall Relic Completion</p>
+          <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">
+            {overall.done.toLocaleString()} / {overall.total.toLocaleString()} steps
+          </p>
+        </div>
+        <span className={cn("text-3xl font-bold tabular-nums", overall.pct === 100 ? "text-emerald-400" : "text-foreground")}>
+          {overall.pct}%
+        </span>
+      </div>
+
+      {/* Main bar */}
+      <ProgressBar pct={overall.pct} colorClass="bg-primary" height="h-3" />
+
+      {/* Category breakdown */}
+      <div className="grid grid-cols-3 gap-x-6 gap-y-1 pt-1">
+        {categories.map(({ label, pct, done, total, color }) => (
+          <div key={label} className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground font-medium">{label}</span>
+              <span className={cn("text-xs tabular-nums font-semibold", pct === 100 ? "text-emerald-400" : "text-foreground/80")}>
+                {pct}%
+              </span>
+            </div>
+            <ProgressBar pct={pct} colorClass={color} height="h-1.5" />
+            <p className="text-[10px] text-muted-foreground tabular-nums">
+              {done.toLocaleString()} / {total.toLocaleString()} steps
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function RelicOverview({ progressMap }: { progressMap: ProgressMap }) {
   const weaponTracks = RELIC_TRACKS.filter((t) => t.category === "weapon")
   const armorTracks = RELIC_TRACKS.filter((t) => t.category === "armor")
@@ -153,6 +232,7 @@ export function RelicOverview({ progressMap }: { progressMap: ProgressMap }) {
 
   return (
     <div className="space-y-10">
+      <TotalProgress progressMap={progressMap} />
       <OverviewGrid
         title="Weapons"
         tracks={weaponTracks}
@@ -194,37 +274,86 @@ function OverviewGrid({
   return (
     <div>
       <h3 className="text-base font-semibold mb-3">{title}</h3>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="rounded-lg border border-border">
         <table className="border-collapse text-xs min-w-full">
-          <thead>
-            <tr className="bg-muted/40 border-b border-border">
-              <th className="text-left px-3 py-2.5 text-muted-foreground font-medium whitespace-nowrap sticky left-0 bg-muted/40 z-10 min-w-[160px]">
-                Step
-              </th>
-              {columnJobs.map((job) => (
-                <th key={job.key} className="px-1 py-2 text-center min-w-[40px]">
-                  <div className="flex flex-col items-center gap-0.5">
-                    {isArmorSlots ? (
-                      <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
-                        {job.label.slice(0, 4)}
+          <thead className="sticky top-14 z-20">
+            {isArmorSlots ? (
+              <>
+                {/* Row 1: gear set group headers */}
+                <tr className="bg-muted border-t border-border shadow-sm">
+                  <th
+                    rowSpan={2}
+                    className="text-left px-3 py-2 text-muted-foreground font-semibold whitespace-nowrap sticky left-0 bg-muted z-10 min-w-[160px] border-b border-border"
+                  >
+                    Step
+                  </th>
+                  {ARMOR_GEAR_SETS.map((gs) => (
+                    <th
+                      key={gs}
+                      colSpan={5}
+                      className="px-1 py-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-muted-foreground border-l border-b border-border bg-muted"
+                    >
+                      {gs}
+                    </th>
+                  ))}
+                  <th
+                    rowSpan={2}
+                    className="px-3 py-2 text-right text-muted-foreground font-semibold whitespace-nowrap border-l border-b border-border bg-muted min-w-[52px]"
+                  >
+                    %
+                  </th>
+                </tr>
+                {/* Row 2: slot names within each group */}
+                <tr className="bg-muted border-b border-border">
+                  {columnJobs.map((job) => (
+                    <th
+                      key={job.key}
+                      className={cn(
+                        "px-1 py-1 text-center min-w-[32px] bg-muted",
+                        job.label === "Head" && "border-l border-border"
+                      )}
+                    >
+                      <span className="text-[9px] font-medium text-muted-foreground/70">
+                        {job.label.slice(0, 2)}
                       </span>
-                    ) : (
-                      <>
-                        <JobIcon jobName={job.key} size={20} />
-                        <span className="text-[9px] text-muted-foreground">
-                          {JOB_ABBREVIATIONS[job.key] ?? job.label}
-                        </span>
-                      </>
-                    )}
-                  </div>
+                    </th>
+                  ))}
+                </tr>
+              </>
+            ) : (
+              <tr className="bg-muted border-y border-border shadow-sm">
+                <th className="text-left px-3 py-2 text-muted-foreground font-semibold whitespace-nowrap sticky left-0 bg-muted z-10 min-w-[160px]">
+                  Step
                 </th>
-              ))}
-            </tr>
+                {columnJobs.map((job) => (
+                  <th key={job.key} className="px-1 py-2 text-center min-w-[40px] bg-muted">
+                    <div className="flex flex-col items-center gap-0.5">
+                      <JobIcon jobName={job.key} size={20} />
+                      <span className="text-[9px] text-muted-foreground">
+                        {JOB_ABBREVIATIONS[job.key] ?? job.label}
+                      </span>
+                    </div>
+                  </th>
+                ))}
+                <th className="px-3 py-2 text-right text-muted-foreground font-semibold whitespace-nowrap border-l border-border bg-muted min-w-[52px]">
+                  %
+                </th>
+              </tr>
+            )}
           </thead>
           <tbody>
             {tracks.flatMap((track) => {
               const jobSet = new Set(track.jobs.map((j) => j.key))
+              const trackJobs = columnJobs.filter((j) => jobSet.has(j.key))
               const rows: React.ReactNode[] = []
+
+              // Track-level completion %
+              const totalCells = trackJobs.length * track.steps.length
+              const doneCells = trackJobs.reduce((acc, job) => {
+                const raw = progressMap[pKey(track.expansionKey, track.category, job.key)] ?? []
+                return acc + effCompleted(raw, track.steps).length
+              }, 0)
+              const trackPct = totalCells > 0 ? Math.round((doneCells / totalCells) * 100) : 0
 
               // Expansion group header
               rows.push(
@@ -235,6 +364,11 @@ function OverviewGrid({
                   >
                     {track.expansionLabel} — {track.categoryLabel}
                   </td>
+                  <td className="px-3 py-1 text-right tabular-nums text-[10px] font-bold bg-muted/20 border-t-2 border-border border-l border-border/40 whitespace-nowrap">
+                    <span className={cn(trackPct === 100 ? "text-emerald-400" : "text-muted-foreground/60")}>
+                      {trackPct}%
+                    </span>
+                  </td>
                 </tr>
               )
 
@@ -243,6 +377,13 @@ function OverviewGrid({
                 const iconUrl = isArmorSlots
                   ? ""
                   : stageIconUrl(track.expansionKey, track.category, step.stage)
+
+                const stepDone = trackJobs.filter((job) => {
+                  const raw = progressMap[pKey(track.expansionKey, track.category, job.key)] ?? []
+                  return effCompleted(raw, track.steps).includes(step.key)
+                }).length
+                const stepTotal = trackJobs.length
+                const stepPct = stepTotal > 0 ? Math.round((stepDone / stepTotal) * 100) : 0
 
                 rows.push(
                   <tr
@@ -253,15 +394,16 @@ function OverviewGrid({
                       {step.label}
                     </td>
                     {columnJobs.map((job) => {
+                      const isSetBoundary = isArmorSlots && job.label === "Head"
                       if (!jobSet.has(job.key)) {
-                        return <td key={job.key} className="px-1 py-1.5 text-center bg-muted/5" />
+                        return <td key={job.key} className={cn("px-1 py-1.5 text-center bg-muted/5", isSetBoundary && "border-l border-border/40")} />
                       }
                       const raw = progressMap[pKey(track.expansionKey, track.category, job.key)] ?? []
                       const eff = effCompleted(raw, track.steps)
                       const completed = eff.includes(step.key)
 
                       return (
-                        <td key={job.key} className="px-1 py-1.5 text-center">
+                        <td key={job.key} className={cn("px-1 py-1.5 text-center", isSetBoundary && "border-l border-border/40")}>
                           {completed ? (
                             isArmorSlots ? (
                               <span className="text-emerald-400 font-bold text-sm leading-none block text-center">✓</span>
@@ -274,6 +416,14 @@ function OverviewGrid({
                         </td>
                       )
                     })}
+                    <td className="px-3 py-1.5 text-right tabular-nums border-l border-border/20 whitespace-nowrap">
+                      <span className={cn(
+                        "text-xs",
+                        stepPct === 100 ? "text-emerald-400 font-medium" : stepDone > 0 ? "text-foreground/60" : "text-muted-foreground/30"
+                      )}>
+                        {stepPct === 100 ? "✓" : stepDone > 0 ? `${stepDone}/${stepTotal}` : "—"}
+                      </span>
+                    </td>
                   </tr>
                 )
               }

@@ -69,7 +69,8 @@ function OrDivider() {
 function AuthForms() {
   const router = useRouter()
   const params = useSearchParams()
-  const redirectTo = params.get("redirectTo") ?? "/dashboard"
+  const rawRedirect = params.get("redirectTo")
+  const redirectTo = rawRedirect && rawRedirect.startsWith("/") ? rawRedirect : "/dashboard"
   const defaultTab = params.get("tab") === "register" ? "register" : "login"
 
   const [loginEmail, setLoginEmail] = useState("")
@@ -88,14 +89,17 @@ function AuthForms() {
     e.preventDefault()
     setLoginError("")
     setLoginLoading(true)
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword })
-    if (error) {
-      setLoginError(error.message)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword })
+      if (error) {
+        setLoginError(error.message)
+      } else {
+        router.push(redirectTo)
+        router.refresh()
+      }
+    } finally {
       setLoginLoading(false)
-    } else {
-      router.push(redirectTo)
-      router.refresh()
     }
   }
 

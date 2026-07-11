@@ -46,43 +46,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 })
   }
 
-  const { data: character } = await supabase
-    .from("characters")
-    .select("id")
-    .eq("id", characterId)
-    .eq("user_id", user.id)
-    .single()
-  if (!character) return NextResponse.json({ error: "Not found" }, { status: 404 })
+  // Ownership check + atomic array update in one round-trip via Postgres function.
+  // Eliminates the TOCTOU race from the prior read-then-upsert approach.
+  const { data, error } = await supabase.rpc("toggle_relic_step", {
+    p_character_id:  characterId,
+    p_expansion_key: expansionKey,
+    p_category:      category,
+    p_job_key:       jobKey,
+    p_step_key:      stepKey,
+    p_completed:     completed ?? false,
+  })
 
-  const { data: existing } = await supabase
-    .from("relic_progress")
-    .select("completed_steps")
-    .eq("character_id", characterId)
-    .eq("expansion_key", expansionKey)
-    .eq("category", category)
-    .eq("job_key", jobKey)
-    .maybeSingle()
+  if (error) {
+    const status = error.message === "Not found" ? 404 : 500
+    return NextResponse.json({ error: error.message }, { status })
+  }
 
-  const currentSteps: string[] = existing?.completed_steps ?? []
-  const newSteps = completed
-    ? [...new Set([...currentSteps, stepKey])]
-    : currentSteps.filter((s) => s !== stepKey)
-
-  const { error } = await supabase
-    .from("relic_progress")
-    .upsert(
-      {
-        character_id: characterId,
-        expansion_key: expansionKey,
-        category,
-        job_key: jobKey,
-        completed_steps: newSteps,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "character_id,expansion_key,category,job_key" }
-    )
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  return NextResponse.json({ ok: true, completedSteps: newSteps })
+  return NextResponse.json({ ok: true, completedSteps: data })
 }

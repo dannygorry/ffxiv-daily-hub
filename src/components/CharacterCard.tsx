@@ -1,5 +1,5 @@
 import { memo } from "react"
-import type { LodestoneCardData } from "@/lib/ffxiv/lodestone-card"
+import type { LodestoneCardData, JobEntry } from "@/lib/ffxiv/lodestone-card"
 import { JOB_DISPLAY_ORDER, type JobRole } from "@/lib/ffxiv/ffxiv-jobs"
 
 export interface CardSettings {
@@ -9,11 +9,20 @@ export interface CardSettings {
   showMounts: boolean
   showMinions: boolean
   showEureka: boolean
+  showRelicProgress: boolean
+}
+
+export interface RelicProgressData {
+  overall: number
+  weapons: number
+  armor: number
+  tools: number
 }
 
 interface CharacterCardProps {
   data: LodestoneCardData
   settings: CardSettings
+  relicProgress?: RelicProgressData | null
 }
 
 const ROLE_COLORS: Record<JobRole, string> = {
@@ -54,17 +63,10 @@ function CollectionBar({
 }) {
   const pct = total > 0 ? Math.round((owned / total) * 100) : 0
   return (
-    <div className="flex items-center gap-2">
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
       <span style={{ color: "#9ca3af", fontSize: 11, width: 52, flexShrink: 0 }}>{label}</span>
-      <div style={{ flex: 1, height: 6, background: "rgba(255,255,255,0.1)", borderRadius: 3 }}>
-        <div
-          style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: accent,
-            borderRadius: 3,
-          }}
-        />
+      <div style={{ flex: 1, minWidth: 0, height: 6, background: "rgba(255,255,255,0.1)", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: accent, borderRadius: 3 }} />
       </div>
       <span style={{ color: "#e5e7eb", fontSize: 11, width: 34, textAlign: "right", flexShrink: 0 }}>
         {pct}%
@@ -122,30 +124,46 @@ function JobGrid({ jobs }: { jobs: LodestoneCardData["jobs"] }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      {activeRows.map((row) => (
-        <div key={row.role} style={{ display: "flex", alignItems: "center", gap: 3 }}>
-          <span
-            style={{
-              fontSize: 8,
-              color: ROLE_COLORS[row.role],
-              width: 36,
-              flexShrink: 0,
-              fontWeight: 700,
-              letterSpacing: "0.05em",
-            }}
-          >
-            {row.label}
-          </span>
-          <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-            {row.names.map((name) => {
-              const job = jobMap.get(name)
-              if (!job) return null
-              return <JobChip key={name} job={job} />
-            })}
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      {activeRows.map((row) => {
+        const rowJobs = row.names
+          .map((n) => jobMap.get(n))
+          .filter((j): j is JobEntry => j !== undefined)
+
+        // Group into rows of 4 — roles with >4 jobs stack the extra row(s) below
+        const CHIPS_PER_ROW = 4
+        const groups: JobEntry[][] = []
+        for (let i = 0; i < rowJobs.length; i += CHIPS_PER_ROW) {
+          groups.push(rowJobs.slice(i, i + CHIPS_PER_ROW))
+        }
+
+        return (
+          <div key={row.role} style={{ display: "flex", alignItems: "flex-start", gap: 3 }}>
+            <span
+              style={{
+                fontSize: 8,
+                color: ROLE_COLORS[row.role],
+                width: 36,
+                flexShrink: 0,
+                fontWeight: 700,
+                letterSpacing: "0.05em",
+                paddingTop: 5,
+              }}
+            >
+              {row.label}
+            </span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {groups.map((group, gIdx) => (
+                <div key={gIdx} style={{ display: "flex", gap: 2 }}>
+                  {group.map((job) => (
+                    <JobChip key={job.name} job={job} />
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -197,6 +215,21 @@ function JobChip({ job }: { job: NonNullable<LodestoneCardData["jobs"][number]> 
   )
 }
 
+function RelicBar({ label, pct, accent }: { label: string; pct: number; accent: string }) {
+  const fill = pct === 100 ? "#34d399" : accent
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+      <span style={{ color: "#9ca3af", fontSize: 10, width: 52, flexShrink: 0 }}>{label}</span>
+      <div style={{ flex: 1, minWidth: 0, height: 5, background: "rgba(255,255,255,0.1)", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: fill, borderRadius: 3 }} />
+      </div>
+      <span style={{ color: pct === 100 ? "#34d399" : "#e5e7eb", fontSize: 10, width: 28, textAlign: "right", flexShrink: 0, fontWeight: pct === 100 ? 700 : 400 }}>
+        {pct}%
+      </span>
+    </div>
+  )
+}
+
 function StatRow({ label, value }: { label: string; value: string | null }) {
   if (!value) return null
   return (
@@ -209,7 +242,7 @@ function StatRow({ label, value }: { label: string; value: string | null }) {
   )
 }
 
-export const CharacterCard = memo(function CharacterCard({ data, settings }: CharacterCardProps) {
+export const CharacterCard = memo(function CharacterCard({ data, settings, relicProgress }: CharacterCardProps) {
   const {
     customPortraitUrl,
     cardAccentColor: accent,
@@ -217,6 +250,7 @@ export const CharacterCard = memo(function CharacterCard({ data, settings }: Cha
     showMounts,
     showMinions,
     showEureka,
+    showRelicProgress,
   } = settings
 
   const portraitSrc = customPortraitUrl
@@ -225,11 +259,12 @@ export const CharacterCard = memo(function CharacterCard({ data, settings }: Cha
     ? proxySrc(data.portraitUrl)
     : ""
 
-  const hasMounts = showMounts && data.mountsTotal > 0
-  const hasMinions = showMinions && data.minionsTotal > 0
+  const hasMounts = showMounts && data.mountsOwned > 0
+  const hasMinions = showMinions && data.minionsOwned > 0
   const hasCollections = hasMounts || hasMinions
   const hasJobs = showJobGrid && data.jobs.length > 0
   const hasEureka = showEureka && (data.eurekaLevel != null || data.bozjaRank != null)
+  const hasRelics = showRelicProgress && relicProgress != null
 
   return (
     <div
@@ -304,11 +339,12 @@ export const CharacterCard = memo(function CharacterCard({ data, settings }: Cha
       <div
         style={{
           flex: 1,
+          minWidth: 0,
           padding: "20px 20px 16px 16px",
           display: "flex",
           flexDirection: "column",
           gap: 10,
-          overflowY: "hidden",
+          overflow: "hidden",
           background: "rgba(15,15,20,0.7)",
         }}
       >
@@ -339,89 +375,137 @@ export const CharacterCard = memo(function CharacterCard({ data, settings }: Cha
         {/* Divider */}
         <div style={{ height: 1, background: `${accent}44` }} />
 
-        {/* Character details */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <StatRow
-            label="Race & Clan"
-            value={[data.race, data.clan].filter(Boolean).join(", ") || null}
-          />
-          <StatRow label="Guardian" value={data.guardian || null} />
-          {data.grandCompany && (
-            <StatRow
-              label="Grand Company"
-              value={
-                data.grandCompanyRank
-                  ? `${data.grandCompany} · ${data.grandCompanyRank}`
-                  : data.grandCompany
-              }
-            />
-          )}
-          {data.freeCompany && (
-            <StatRow
-              label="Free Company"
-              value={
-                data.freeCompanyTag
-                  ? `${data.freeCompany} «${data.freeCompanyTag}»`
-                  : data.freeCompany
-              }
-            />
-          )}
-          {hasEureka && (
-            <>
-              {data.eurekaLevel != null && (
-                <StatRow label="Elemental Lv." value={`Level ${data.eurekaLevel}`} />
+        {/* Two-column body: LEFT (character info + bars) | RIGHT (job grid) */}
+        <div style={{ flex: 1, display: "flex", gap: 12, overflow: "hidden", minWidth: 0 }}>
+          {/* Left column — character details, collections, relic progress */}
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <StatRow
+                label="Race & Clan"
+                value={[data.race, data.clan].filter(Boolean).join(", ") || null}
+              />
+              <StatRow label="Guardian" value={data.guardian || null} />
+              {data.grandCompany && (
+                <StatRow
+                  label="Grand Company"
+                  value={
+                    data.grandCompanyRank
+                      ? `${data.grandCompany} · ${data.grandCompanyRank}`
+                      : data.grandCompany
+                  }
+                />
               )}
-              {data.bozjaRank != null && (
-                <StatRow label="Resistance Rank" value={`Rank ${data.bozjaRank}`} />
+              {data.freeCompany && (
+                <StatRow
+                  label="Free Company"
+                  value={
+                    data.freeCompanyTag
+                      ? `${data.freeCompany} «${data.freeCompanyTag}»`
+                      : data.freeCompany
+                  }
+                />
               )}
-            </>
+              {hasEureka && (
+                <>
+                  {data.eurekaLevel != null && (
+                    <StatRow label="Elemental Lv." value={`Level ${data.eurekaLevel}`} />
+                  )}
+                  {data.bozjaRank != null && (
+                    <StatRow label="Resistance Rank" value={`Rank ${data.bozjaRank}`} />
+                  )}
+                </>
+              )}
+            </div>
+
+            {hasCollections && (
+              <>
+                <div style={{ height: 1, background: `${accent}44` }} />
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {hasMounts && (
+                    <CollectionBar
+                      label="Mounts"
+                      owned={data.mountsOwned}
+                      total={data.mountsTotal}
+                      accent={accent}
+                    />
+                  )}
+                  {hasMinions && (
+                    <CollectionBar
+                      label="Minions"
+                      owned={data.minionsOwned}
+                      total={data.minionsTotal}
+                      accent={accent}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+
+            {hasRelics && (
+              <>
+                <div style={{ height: 1, background: `${accent}44` }} />
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 5,
+                    overflow: "hidden",
+                    minWidth: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 9,
+                        color: "#6b7280",
+                        letterSpacing: "0.1em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Relic Progress
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        color: relicProgress!.overall === 100 ? "#34d399" : "#6b7280",
+                      }}
+                    >
+                      {relicProgress!.overall}% overall
+                    </span>
+                  </div>
+                  <RelicBar label="Weapons" pct={relicProgress!.weapons} accent={accent} />
+                  <RelicBar label="Armor"   pct={relicProgress!.armor}   accent={accent} />
+                  <RelicBar label="Tools"   pct={relicProgress!.tools}   accent={accent} />
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Right column — job grid */}
+          {hasJobs && (
+            <div style={{ width: 220, flexShrink: 0, overflow: "hidden" }}>
+              <JobGrid jobs={data.jobs} />
+            </div>
           )}
         </div>
 
-        {/* Collections */}
-        {hasCollections && (
-          <>
-            <div style={{ height: 1, background: `${accent}44` }} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {hasMounts && (
-                <CollectionBar
-                  label="Mounts"
-                  owned={data.mountsOwned}
-                  total={data.mountsTotal}
-                  accent={accent}
-                />
-              )}
-              {hasMinions && (
-                <CollectionBar
-                  label="Minions"
-                  owned={data.minionsOwned}
-                  total={data.minionsTotal}
-                  accent={accent}
-                />
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Job grid */}
-        {hasJobs && (
-          <>
-            <div style={{ height: 1, background: `${accent}44` }} />
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <JobGrid jobs={data.jobs} />
-            </div>
-          </>
-        )}
-
         {/* Footer watermark */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            marginTop: "auto",
-            paddingTop: 4,
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 4 }}>
           <span style={{ fontSize: 9, color: "#374151" }}>FFXIV Hub</span>
         </div>
       </div>

@@ -45,11 +45,6 @@ async function fetchPage(path: string): Promise<string> {
   return res.text()
 }
 
-function parseCount(text: string): [number, number] {
-  const m = text.match(/(\d+)\s*\/\s*(\d+)/)
-  if (m) return [parseInt(m[1], 10), parseInt(m[2], 10)]
-  return [0, 0]
-}
 
 async function scrapeMainPage(lodestoneId: number) {
   const html = await fetchPage(`/character/${lodestoneId}/`)
@@ -95,10 +90,23 @@ async function scrapeMainPage(lodestoneId: number) {
     const blockText = nameEl.text().trim()
 
     if (blockTitle.includes("race") || blockTitle.includes("clan")) {
-      // "Au Ra / Xaela / ♀" — split by /
-      const parts = blockText.split("/").map((s) => s.trim())
-      race = parts[0] ?? ""
-      clan = parts[1] ?? ""
+      // Lodestone renders race/clan with a <br> between them: "Au Ra<br>Xaela / ♀"
+      // cheerio's .text() collapses the <br> to nothing → "Au RaXaela / ♀".
+      // Split the raw HTML on <br> to preserve the race/clan boundary.
+      const rawHtml = nameEl.html() ?? ""
+      const brParts = rawHtml
+        .split(/<br\s*\/?>/i)
+        .map((p) => load(p).text().trim())
+        .filter(Boolean)
+      if (brParts.length >= 2) {
+        race = brParts[0]
+        clan = brParts[1].split("/")[0].trim() // strip trailing " / ♀"
+      } else {
+        // Fallback: old single-line "Au Ra / Xaela / ♀" format
+        const parts = blockText.split("/").map((s) => s.trim())
+        race = parts[0] ?? ""
+        clan = parts[1] ?? ""
+      }
     } else if (blockTitle.includes("guardian")) {
       guardian = blockText
     } else if (blockTitle.includes("grand company")) {
@@ -124,18 +132,54 @@ async function scrapeMainPage(lodestoneId: number) {
     }
   }
 
-  // Eureka Elemental Level — shown in a special section
+  // Eureka Elemental Level / Bozja Resistance Rank
   let eurekaLevel: number | null = null
   let bozjaRank: number | null = null
-  $(".character__spec").each((_, el) => {
-    const specTitle = $(el).find(".character__spec__title, h3, .title").text().trim().toLowerCase()
-    const specLevel = $(el).find(".character__spec__level, .level").text().trim()
-    if (specTitle.includes("eureka") || specTitle.includes("elemental")) {
-      eurekaLevel = parseInt(specLevel, 10) || null
-    } else if (specTitle.includes("bozja") || specTitle.includes("resistance")) {
-      bozjaRank = parseInt(specLevel, 10) || null
+
+  // Try structured selectors — class names vary by Lodestone version
+  $(".character__level, .character__spec, [class*='character__level']").each((_, el) => {
+    const blockText = $(el).text()
+    const lower = blockText.toLowerCase()
+    const numMatch = blockText.match(/\b(\d+)\b/)
+    const num = numMatch ? parseInt(numMatch[1], 10) : null
+    if (!num) return
+    if ((lower.includes("elemental") || lower.includes("eureka")) && eurekaLevel === null) {
+      eurekaLevel = num
+    } else if ((lower.includes("resistance rank") || lower.includes("bozja")) && bozjaRank === null) {
+      bozjaRank = num
     }
   })
+
+  // Fallback: <dt>Label</dt><dd>N</dd> pattern (Lodestone uses definition lists)
+  if (eurekaLevel === null || bozjaRank === null) {
+    $("dt").each((_, el) => {
+      const label = $(el).text().trim().toLowerCase()
+      const dd = $(el).next("dd")
+      if (!dd.length) return
+      const num = parseInt(dd.text().trim(), 10)
+      if (!num || num <= 0) return
+      if (label.includes("elemental") && eurekaLevel === null) eurekaLevel = num
+      else if (label.includes("resistance rank") && bozjaRank === null) bozjaRank = num
+    })
+  }
+
+  // Text-scan fallback — inline "Elemental Level 69" or "Resistance Rank 25" format
+  if (eurekaLevel === null) {
+    $("p, div, span").each((_, el) => {
+      if (eurekaLevel !== null) return
+      const text = $(el).text().trim()
+      const m = text.match(/elemental level[:\s]+(\d+)/i)
+      if (m) eurekaLevel = parseInt(m[1], 10)
+    })
+  }
+  if (bozjaRank === null) {
+    $("p, div, span").each((_, el) => {
+      if (bozjaRank !== null) return
+      const text = $(el).text().trim()
+      const m = text.match(/resistance rank[:\s]+(\d+)/i)
+      if (m) bozjaRank = parseInt(m[1], 10)
+    })
+  }
 
   return {
     name,
@@ -190,56 +234,69 @@ async function scrapeClassJobs(lodestoneId: number): Promise<JobEntry[]> {
     jobs.push({ name, level, role, iconUrl })
   })
 
-  console.log("[lodestone-card] scraped jobs:", jobs.map((j) => `${j.name}(${j.level})`).join(", "))
   return jobs
+}
+
+// Fallback totals used when the ffxivcollect.com API is unreachable.
+// Update after each major patch if needed.
+const FALLBACK_TOTALS = { mount: 375, minion: 494 }
+
+// Fetch current game totals from ffxivcollect.com.
+// Next.js caches each response for 24 h so the full list is only downloaded
+// once per day regardless of how many Lodestone refreshes happen.
+async function fetchGameTotals(): Promise<{ mount: number; minion: number }> {
+  const pluck = (data: unknown): number | null => {
+    if (!data || typeof data !== "object") return null
+    const d = data as Record<string, unknown>
+    // DRF-style: { count: N, results: [...] } — N is the TOTAL when no limit is applied
+    if (typeof d.count === "number" && d.count > 0) return d.count
+    // Some APIs expose a separate total field
+    if (typeof d.total === "number" && d.total > 0) return d.total
+    // Last resort: length of a results array
+    if (Array.isArray(d.results) && d.results.length > 0) return d.results.length
+    if (Array.isArray(d) && (d as unknown[]).length > 0) return (d as unknown[]).length
+    return null
+  }
+  try {
+    const [mountRes, minionRes] = await Promise.all([
+      fetch("https://ffxivcollect.com/api/mounts", { next: { revalidate: 86400 } }),
+      fetch("https://ffxivcollect.com/api/minions", { next: { revalidate: 86400 } }),
+    ])
+    if (!mountRes.ok || !minionRes.ok) return FALLBACK_TOTALS
+    const [m, n] = await Promise.all([mountRes.json(), minionRes.json()])
+    return {
+      mount: pluck(m) ?? FALLBACK_TOTALS.mount,
+      minion: pluck(n) ?? FALLBACK_TOTALS.minion,
+    }
+  } catch {
+    return FALLBACK_TOTALS
+  }
 }
 
 async function scrapeCollection(
   lodestoneId: number,
-  type: "mount" | "minion"
+  type: "mount" | "minion",
+  gameTotals: { mount: number; minion: number }
 ): Promise<[number, number]> {
   const html = await fetchPage(`/character/${lodestoneId}/${type}/`)
   const $ = load(html)
 
-  // Look for "X / Y" pattern in the heading or a count element
-  let owned = 0, total = 0
-
-  // Try dedicated count element first
-  const countEl = $(".character__collection__count, .total, .count").first()
-  if (countEl.length) {
-    ;[owned, total] = parseCount(countEl.text())
-  }
-
-  // Fallback: scan all text for "digits / digits" pattern
-  if (total === 0) {
-    $("h1, h2, h3, p").each((_, el) => {
-      const text = $(el).text()
-      if (text.match(/\d+\s*\/\s*\d+/) && total === 0) {
-        ;[owned, total] = parseCount(text)
-      }
-    })
-  }
-
-  // Last resort: count the actual items listed
-  if (total === 0) {
-    const items = $(".mount__list li, .minion__list li, .character__minion li, .character__mount li").length
-    if (items > 0) {
-      owned = items
-      total = items
-    }
-  }
-
-  return [owned, total]
+  // Lodestone only renders owned items server-side; the N/M total is injected
+  // by JavaScript. Count the owned li items and use the live game total.
+  const listClass = type === "mount" ? "mount__list_icon" : "minion__list_icon"
+  const owned = $(`li.${listClass}`).length
+  return [owned, gameTotals[type]]
 }
 
 export async function scrapeLodestoneCardData(
   lodestoneId: number
 ): Promise<LodestoneCardData> {
+  const gameTotals = await fetchGameTotals()
   const [mainData, jobs, mountCounts, minionCounts] = await Promise.all([
     scrapeMainPage(lodestoneId).catch(() => null),
     scrapeClassJobs(lodestoneId).catch(() => [] as JobEntry[]),
-    scrapeCollection(lodestoneId, "mount").catch(() => [0, 0] as [number, number]),
-    scrapeCollection(lodestoneId, "minion").catch(() => [0, 0] as [number, number]),
+    scrapeCollection(lodestoneId, "mount", gameTotals).catch(() => [0, 0] as [number, number]),
+    scrapeCollection(lodestoneId, "minion", gameTotals).catch(() => [0, 0] as [number, number]),
   ])
 
   return {
