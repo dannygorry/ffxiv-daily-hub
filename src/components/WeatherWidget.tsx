@@ -59,7 +59,7 @@ function ZoneWeather({ zone, now }: { zone: Zone; now: Date }) {
         <p className="text-xs text-muted-foreground">{zone.region}</p>
       </CardHeader>
       <CardContent className="px-4 pb-3">
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 overflow-hidden">
           {windows.map((w, i) => (
             <WeatherWindowCard
               key={i}

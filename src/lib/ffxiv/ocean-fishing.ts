@@ -49,6 +49,13 @@ const BOARDING_WINDOW_MS = 900_000 // 15 min before departure
 export type VoyageCode = 'B' | 'N' | 'R' | 'T'
 export type TimeOfDay = 'Day' | 'Sunset' | 'Night'
 
+export interface BonusFish {
+  category: string   // 'Sharks' | 'Octopodes' | 'Jellyfish' | 'Mantas' | 'Crabs' | 'Seadragons' | 'Balloons' | 'Shrimp' | 'Shellfish' | 'Squid' | 'Mantis Shrimp' | 'Prehistoric'
+  bait: string       // 'Ragworm' | 'Krill' | 'Plump Worm'
+  fish: string[]
+  note?: string
+}
+
 export interface ZoneStop {
   zoneName: string
   spectralBait: string
@@ -58,6 +65,7 @@ export interface ZoneStop {
   // "spectral" = only during spectral current; "pre-spectral" = must be done before spectral
   intuitionWindow?: 'spectral' | 'pre-spectral'
   intuitionNote?: string
+  bonusFish?: BonusFish[]
 }
 
 export interface VoyageData {
@@ -89,26 +97,51 @@ const Z = {
     intuitionBait: 'Glowworm',
     intuitionWindow: 'spectral' as const,
     intuitionNote: 'Switch to Glowworm the moment spectral activates. Night only.',
+    bonusFish: [
+      { category: 'Octopodes', bait: 'Krill',       fish: ['Cyan Octopus', "Merman's Mane"] },
+      { category: 'Sharks',    bait: 'Plump Worm',  fish: ['Tarnished Shark', 'Ghost Shark', 'Quicksilver Blade', 'Funnel Shark'] },
+    ],
   },
   southern: {
     zoneName: 'The Southern Strait of Merlthor',
     spectralBait: 'Krill',
     spectralFish: 'Spectral Discus',
+    bonusFish: [
+      { category: 'Jellyfish',  bait: 'Ragworm', fish: ['La Noscean Jelly', 'Sea Nettle'] },
+      { category: 'Seadragons', bait: 'Ragworm', fish: ['Shaggy Seadragon', 'Aetheric Seadragon'], note: 'Aetheric Seadragon requires Fisher\'s Intuition' },
+      { category: 'Balloons',   bait: 'Krill',   fish: ['Marine Bomb'] },
+    ],
   },
   northern: {
     zoneName: 'The Northern Strait of Merlthor',
     spectralBait: 'Ragworm',
     spectralFish: 'Spectral Sea Bo',
+    bonusFish: [
+      { category: 'Crabs',      bait: 'Ragworm', fish: ['Bartholomew the Chopper', 'Net Crawler'] },
+      { category: 'Octopodes',  bait: 'Krill',   fish: ['Mopbeard'] },
+      { category: 'Seadragons', bait: 'Ragworm', fish: ['Coral Seadragon'] },
+      { category: 'Balloons',   bait: 'Krill',   fish: ['Tripod Fish'] },
+    ],
   },
   rhotano: {
     zoneName: 'Open Rhotano Sea',
     spectralBait: 'Plump Worm',
     spectralFish: 'Spectral Bass',
+    bonusFish: [
+      { category: 'Sharks',    bait: 'Plump Worm', fish: ['Sweeper', 'Executioner', 'Chrome Hammerhead'] },
+      { category: 'Jellyfish', bait: 'Krill',       fish: ['Floating Saucer'] },
+      { category: 'Balloons',  bait: 'Ragworm',     fish: ['Silencer', 'Lampfish'] },
+    ],
   },
   cieldalaes: {
     zoneName: 'Cieldalaes Margin',
     spectralBait: 'Ragworm',
     spectralFish: 'Spectral Butterfly',
+    bonusFish: [
+      { category: 'Crabs',    bait: 'Krill',      fish: ['Titanshell Crab', 'Tortoiseshell Crab'] },
+      { category: 'Mantas',   bait: 'Plump Worm', fish: ['Jetborne Manta', 'Goobbue Ray'] },
+      { category: 'Balloons', bait: 'Ragworm',    fish: ['Mythril Boxfish', 'Metallic Boxfish'] },
+    ],
   },
   bloodbrine: {
     zoneName: 'Open Bloodbrine Sea',
@@ -118,11 +151,22 @@ const Z = {
     intuitionBait: 'Pill Bug',
     intuitionWindow: 'spectral' as const,
     intuitionNote: 'Switch to Pill Bug during spectral current.',
+    bonusFish: [
+      { category: 'Crabs',   bait: 'Ragworm',    fish: ['Exterminator', 'Oracular Crab', 'Bloodpolish Crab', 'Thaliak Crab'] },
+      { category: 'Mantas',  bait: 'Krill',       fish: ['Skaldminni'] },
+      { category: 'Sharks',  bait: 'Plump Worm', fish: ['Quartz Hammerhead'] },
+    ],
   },
   rothlyt: {
     zoneName: 'Outer Rothlyt Sound',
     spectralBait: 'Plump Worm',
     spectralFish: 'Spectresaur',
+    bonusFish: [
+      { category: 'Balloons',  bait: 'Ragworm',    fish: ['Garum Jug', 'Honeycomb Fish', 'Crow Puffer', 'Pearl Bombfish'], note: 'Pearl Bombfish is Krill only' },
+      { category: 'Jellyfish', bait: 'Krill',       fish: ['Living Lantern'] },
+      { category: 'Mantas',    bait: 'Plump Worm', fish: ['Panoptes'] },
+      { category: 'Sharks',    bait: 'Krill',       fish: ['Thavnairian Shark'] },
+    ],
   },
 } satisfies Record<string, ZoneStop>
 
@@ -172,31 +216,59 @@ const RZ = {
     intuitionBait: 'Mackerel Strip',
     intuitionWindow: 'spectral' as const,
     intuitionNote: 'Switch to Mackerel Strip during spectral current.',
+    bonusFish: [
+      { category: 'Shrimp',       bait: 'Krill',      fish: ['Pink Shrimp', 'Vivid Pink Shrimp'] },
+      { category: 'Shellfish',     bait: 'Ragworm',   fish: ['Sirensong Mussel', 'Mermaid Scale'] },
+      { category: 'Squid',         bait: 'Krill',      fish: ['Arrowhead', 'Broadhead'], note: 'Broadhead prefers Plump Worm' },
+      { category: 'Mantis Shrimp', bait: 'Krill',      fish: ['Jade Mantis Shrimp'] },
+      { category: 'Prehistoric',   bait: 'Plump Worm', fish: ['Black-jawed Helicoprion'] },
+    ],
   },
   kugane: {
     zoneName: 'Kugane Coast',
     spectralBait: 'Ragworm',
     spectralFish: 'Spectral Wrasse',
+    bonusFish: [
+      { category: 'Shellfish', bait: 'Ragworm',   fish: ['Maelstrom Turban', 'Whirlpool Turban'] },
+      { category: 'Shrimp',    bait: 'Ragworm',   fish: ['Silkweft Prawn', 'Leopard Prawn'] },
+      { category: 'Squid',     bait: 'Plump Worm', fish: ['Spear Squid', 'Swordtip Squid'] },
+    ],
   },
   rubySea: {
     zoneName: 'Open Ruby Sea',
     spectralBait: 'Krill',
     spectralFish: 'Spectral Snake Eel',
+    bonusFish: [
+      { category: 'Shrimp', bait: 'Ragworm',   fish: ['Barded Lobster', 'Bowbarb Lobster'] },
+      { category: 'Squid',  bait: 'Plump Worm', fish: ['Flying Squid', 'Fleeting Squid', 'Reef Squid'], note: 'Reef Squid prefers Krill' },
+    ],
   },
   oneRiver: {
     zoneName: 'Lower One River',
     spectralBait: 'Krill',
     spectralFish: 'Spectral Kotsu Zetsu',
+    bonusFish: [
+      { category: 'Shellfish', bait: 'Ragworm', fish: ['Crowshadow Mussel'] },
+      { category: 'Shrimp',    bait: 'Ragworm', fish: ['Singular Shrimp', 'Gensui Shrimp'] },
+    ],
   },
   unnamed: {
     zoneName: 'Unnamed Island',
     spectralBait: 'Ragworm',
     spectralFish: 'Spectral Starfish',
+    bonusFish: [
+      { category: 'Mantis Shrimp', bait: 'Ragworm',   fish: ["Captain's Finger", "First Mate's Finger"] },
+      { category: 'Prehistoric',   bait: 'Plump Worm', fish: ['Renegade Rhotanosaurus', 'Tylosaurus', 'Rhotanosaurus', 'Akupara'], note: 'Akupara requires Fisher\'s Intuition' },
+    ],
   },
   thavnair: {
     zoneName: 'Thavnair',
     spectralBait: 'Krill',
     spectralFish: 'Spectral Grouper',
+    bonusFish: [
+      { category: 'Mantis Shrimp', bait: 'Ragworm',   fish: ['Tiger Mantis', 'Great Red Mantis', 'Red Mantis'] },
+      { category: 'Prehistoric',   bait: 'Plump Worm', fish: ['Satrapsaurus', 'Simolestes', 'Pliosaurus', 'Thavnasaurus', 'Manasvin'], note: 'Thavnasaurus takes Krill; Manasvin requires a special bait' },
+    ],
   },
 } satisfies Record<string, ZoneStop>
 

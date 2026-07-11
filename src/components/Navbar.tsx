@@ -48,6 +48,14 @@ export async function Navbar() {
           </Link>
           {user && (
             <Link
+              href="/relic-tracker"
+              className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
+            >
+              Relic Tracker
+            </Link>
+          )}
+          {user && (
+            <Link
               href="/character/card"
               className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
             >

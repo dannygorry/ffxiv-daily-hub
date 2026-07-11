@@ -16,7 +16,7 @@ export function EorzeaClock() {
   if (!time) return <span className="font-mono text-primary text-xl">--:--:--</span>
 
   const pad = (n: number) => String(n).padStart(2, "0")
-  const period = time.hours >= 12 ? "ET" : "ET"
+  const period = "ET"
   const h12 = time.hours % 12 || 12
   const isDay = time.hours >= 6 && time.hours < 20
 

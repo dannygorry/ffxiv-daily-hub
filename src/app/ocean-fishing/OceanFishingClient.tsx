@@ -67,6 +67,29 @@ function ZoneCard({ zone, index }: { zone: ZoneStop; index: number }) {
           )}
         </div>
       )}
+
+      {zone.bonusFish && zone.bonusFish.length > 0 && (
+        <div className="space-y-1.5 pl-7">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Side Objectives
+          </div>
+          <div className="space-y-1.5">
+            {zone.bonusFish.map((bf, i) => (
+              <div key={i}>
+                <div className="flex items-baseline gap-2 text-xs">
+                  <span className="font-semibold text-violet-300 shrink-0">{bf.category}</span>
+                  <span className="text-muted-foreground/50">—</span>
+                  <span className="text-amber-300">{bf.bait}</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground/60 mt-0.5 leading-relaxed">
+                  {bf.fish.join(', ')}
+                  {bf.note && <span className="ml-1 text-amber-400/50"> · {bf.note}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
