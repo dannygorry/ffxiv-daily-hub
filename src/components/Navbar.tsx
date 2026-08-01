@@ -56,6 +56,14 @@ export async function Navbar() {
           )}
           {user && (
             <Link
+              href="/marketplace"
+              className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
+            >
+              Marketplace
+            </Link>
+          )}
+          {user && (
+            <Link
               href="/character/card"
               className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md transition-colors"
             >

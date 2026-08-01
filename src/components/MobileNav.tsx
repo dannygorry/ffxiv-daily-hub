@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Menu, LayoutDashboard, Home, CreditCard, Users, Settings, Fish, Swords } from "lucide-react"
+import { Menu, LayoutDashboard, Home, CreditCard, Users, Settings, Fish, Swords, Coins } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetTrigger, SheetContent, SheetClose } from "@/components/ui/sheet"
 import { Separator } from "@/components/ui/separator"
@@ -51,6 +51,17 @@ export function MobileNav({ isLoggedIn }: { isLoggedIn: boolean }) {
               >
                 <Swords className="size-4" />
                 Relic Tracker
+              </Link>
+            </SheetClose>
+          )}
+          {isLoggedIn && (
+            <SheetClose asChild>
+              <Link
+                href="/marketplace"
+                className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <Coins className="size-4" />
+                Marketplace
               </Link>
             </SheetClose>
           )}
