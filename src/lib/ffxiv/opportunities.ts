@@ -135,12 +135,38 @@ export function isOutlierListing(listingPrice: number, avgSalePrice: number | nu
  */
 export const MAX_AVG_TO_LISTING = 10
 
+/**
+ * Second tier, against the cheapest listing anywhere in the region.
+ *
+ * The home-world check above assumes the listing is independent evidence, and
+ * usually it is. It is not when an item is being used for gil transfer: the
+ * same actor posts the absurd sale *and* an absurd listing, poisoning both home
+ * signals together. Observed live on Gilgamesh — Leather Crakows, a level 5
+ * craftable whose real sales run ~5,000 gil, showed a 50,000,000 average, a
+ * 10,000,000 home listing, and two 50,000,000 sales among eight normal ones.
+ * The home check saw 50M against 10M, a ratio of 5, and let it through as the
+ * top craft with a fabricated 47,499,745 gil profit.
+ *
+ * The region minimum resists this because one seller cannot poison ~100 worlds.
+ * The threshold is deliberately loose: a genuinely thin home market can sit
+ * legitimately far above the cheapest world, so this is a backstop for the
+ * absurd, not a second opinion on the merely expensive. Measured separation was
+ * 25,000,000x for the RMT case against 1x-3x for real items on the same world.
+ */
+export const MAX_AVG_TO_REGION_LISTING = 1000
+
 export function isPoisonedAverage(
   avgSalePrice: number,
-  referenceListing: number | null
+  referenceListing: number | null,
+  regionListing: number | null = null
 ): boolean {
-  if (referenceListing == null || referenceListing <= 0) return false
-  return avgSalePrice > referenceListing * MAX_AVG_TO_LISTING
+  if (referenceListing != null && referenceListing > 0) {
+    if (avgSalePrice > referenceListing * MAX_AVG_TO_LISTING) return true
+  }
+  if (regionListing != null && regionListing > 0) {
+    if (avgSalePrice > regionListing * MAX_AVG_TO_REGION_LISTING) return true
+  }
+  return false
 }
 
 /**
@@ -205,6 +231,14 @@ export function referenceListingOf(
 ): number | null {
   const b = block(agg, quality)
   return b?.minListing?.world?.price ?? b?.recentPurchase?.world?.price ?? null
+}
+
+/** Cheapest listing anywhere in the region — the poison-resistant backstop. */
+export function regionListingPriceOf(
+  agg: UniversalisAggregatedItem,
+  quality: Quality
+): number | null {
+  return block(agg, quality)?.minListing?.region?.price ?? null
 }
 
 export function uploadTimeForWorld(
@@ -331,7 +365,15 @@ export function buildSupplyGap(input: SupplyGapInput): SupplyGapOpportunity | nu
 
   // A single freak sale can become the whole 4-day average. Cross-check against
   // the cheapest live listing before quoting a price back to the user.
-  if (isPoisonedAverage(avgSalePrice, referenceListingOf(agg, quality))) return null
+  if (
+    isPoisonedAverage(
+      avgSalePrice,
+      referenceListingOf(agg, quality),
+      regionListingPriceOf(agg, quality)
+    )
+  ) {
+    return null
+  }
 
   const ageMs = supply.lastUploadTime == null ? null : now - supply.lastUploadTime
   const tier = tierForAge(ageMs)
@@ -412,7 +454,7 @@ export function buildArbitrage(input: ArbitrageInput): ArbitrageOpportunity | nu
   //   3. Neither figure looks individually absurd but the implied markup does
   //      (buy at 1 gil, sell at 33,000,000).
   if (isOutlierListing(region.price, homeSalePrice)) return null
-  if (isPoisonedAverage(homeSalePrice, referenceListingOf(agg, quality))) return null
+  if (isPoisonedAverage(homeSalePrice, referenceListingOf(agg, quality), region.price)) return null
   if (region.price > 0 && homeSalePrice > region.price * MAX_ARBITRAGE_MULTIPLE) return null
 
   const netAtDefault = homeSalePrice * (1 - DEFAULT_TAX_RATE) - region.price
@@ -451,6 +493,228 @@ export function buildArbitrage(input: ArbitrageInput): ArbitrageOpportunity | nu
     cost: region.price,
     taxRateUsed: DEFAULT_TAX_RATE,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Crafting (Phase 2)
+// ---------------------------------------------------------------------------
+
+export interface CraftIngredientCost {
+  itemId: number
+  qty: number
+  unitPrice: number
+  /** True when no live listing existed and a historical average was used. */
+  estimated: boolean
+  /** True when the cheaper path was to craft this ingredient rather than buy it. */
+  crafted: boolean
+}
+
+export interface CraftOpportunity extends Opportunity {
+  kind: "craft"
+  recipeId: number
+  resultQty: number
+  craftType: string | null
+  jobLevel: number | null
+  /** Per-unit sale price of the output at this quality. */
+  resultUnitPrice: number
+  velocity: number
+  ingredients: CraftIngredientCost[]
+}
+
+/** Why a recipe was skipped, for logging rather than silent disappearance. */
+export type CraftSkipReason =
+  | "no_recipe_result_price"
+  | "unpriceable_ingredient"
+  | "untradable_ingredient"
+  | "hq_not_supported"
+  | "poisoned_average"
+  | "not_profitable"
+
+/**
+ * Per-unit acquisition cost for a craft ingredient.
+ *
+ * Prefers what you would actually pay right now (the cheapest live listing),
+ * outlier-guarded, and falls back to the historical average when nothing is
+ * listed. Returns null when neither exists — the recipe is then excluded
+ * outright rather than costed at zero, which would invent profit.
+ */
+export function ingredientUnitPrice(
+  agg: UniversalisAggregatedItem | undefined
+): { price: number; estimated: boolean } | null {
+  if (!agg) return null
+  // Materials are bought NQ: see the output/material independence note below.
+  const listing = agg.nq?.minListing?.world?.price ?? null
+  const average = agg.nq?.averageSalePrice?.world?.price ?? null
+
+  if (listing != null && listing > 0 && !isOutlierListing(listing, average)) {
+    return { price: listing, estimated: false }
+  }
+  if (average != null && average > 0) return { price: average, estimated: true }
+  return null
+}
+
+export interface CraftInput {
+  recipeId: number
+  resultItemId: number
+  resultQty: number
+  craftType: string | null
+  jobLevel: number | null
+  ingredients: { itemId: number; qty: number }[]
+  /** Output quality being priced. */
+  quality: Quality
+  aggByItemId: Map<number, UniversalisAggregatedItem>
+  /** `item_catalog` flags; absent means unknown, which is treated as restrictive. */
+  canBeHq: (itemId: number) => boolean | null
+  isUntradable: (itemId: number) => boolean | null
+  /** Cheaper craft cost for an ingredient, when sub-craft resolution found one. */
+  subCraftCost?: (itemId: number) => number | null
+  partialBatch: boolean
+  now: number
+}
+
+/**
+ * Prices one recipe at one output quality.
+ *
+ * Two rules that are easy to get wrong and were both wrong in earlier drafts:
+ *
+ *  - Revenue must multiply by `resultQty`. 840 of 13,892 recipes yield more
+ *    than one item (796 yield 3x, up to 30x), and omitting it understates
+ *    every one of them.
+ *  - Output quality and material quality are independent. HQ materials raise a
+ *    craft's starting quality but are not required to produce HQ output, so
+ *    pricing an HQ result against HQ inputs invents a cost the player usually
+ *    does not pay. Materials are always costed NQ.
+ */
+export function buildCraft(input: CraftInput): CraftOpportunity | { skipped: CraftSkipReason } {
+  const {
+    recipeId, resultItemId, resultQty, craftType, jobLevel, ingredients,
+    quality, aggByItemId, canBeHq, isUntradable, subCraftCost, partialBatch, now,
+  } = input
+
+  // Unknown metadata is restrictive, not permissive: no HQ row unless the item
+  // is known to support it.
+  if (quality === "hq" && canBeHq(resultItemId) !== true) return { skipped: "hq_not_supported" }
+
+  const resultAgg = aggByItemId.get(resultItemId)
+  const resultUnitPrice = resultAgg ? avgPriceOf(resultAgg, quality) : null
+  const velocity = resultAgg ? velocityOf(resultAgg, quality) : 0
+  if (resultUnitPrice == null || resultUnitPrice <= 0 || velocity <= 0) {
+    return { skipped: "no_recipe_result_price" }
+  }
+  if (
+    resultAgg &&
+    isPoisonedAverage(
+      resultUnitPrice,
+      referenceListingOf(resultAgg, quality),
+      regionListingPriceOf(resultAgg, quality)
+    )
+  ) {
+    return { skipped: "poisoned_average" }
+  }
+
+  const costs: CraftIngredientCost[] = []
+  let totalCost = 0
+  for (const ing of ingredients) {
+    if (isUntradable(ing.itemId) === true) return { skipped: "untradable_ingredient" }
+
+    const bought = ingredientUnitPrice(aggByItemId.get(ing.itemId))
+    const crafted = subCraftCost?.(ing.itemId) ?? null
+
+    let unitPrice: number
+    let estimated: boolean
+    let viaCraft = false
+    if (crafted != null && (bought == null || crafted < bought.price)) {
+      unitPrice = crafted
+      estimated = false
+      viaCraft = true
+    } else if (bought != null) {
+      unitPrice = bought.price
+      estimated = bought.estimated
+    } else {
+      // No listing, no history, no craft path — never assume zero.
+      return { skipped: "unpriceable_ingredient" }
+    }
+
+    costs.push({ itemId: ing.itemId, qty: ing.qty, unitPrice, estimated, crafted: viaCraft })
+    totalCost += unitPrice * ing.qty
+  }
+
+  const grossRevenue = resultUnitPrice * resultQty
+  if (grossRevenue * (1 - DEFAULT_TAX_RATE) - totalCost <= 0) return { skipped: "not_profitable" }
+
+  const penalties: PenaltyCode[] = []
+  if (costs.some((c) => c.estimated)) penalties.push("estimated_ingredient_price")
+  if (isLowSaleCount(velocity)) penalties.push("low_sale_count")
+  if (partialBatch) penalties.push("partial_batch")
+
+  // Crafting has no supply snapshot of its own; freshness rides the result
+  // item's aggregated upload times, which is the best signal available.
+  const upload = resultAgg?.worldUploadTimes?.[0]?.timestamp ?? null
+  const tier = upload == null ? "fresh" : tierForAge(now - upload)
+  if (tier === "excluded") return { skipped: "no_recipe_result_price" }
+
+  return {
+    kind: "craft",
+    itemId: resultItemId,
+    recipeId,
+    quality,
+    confidence: buildConfidence(tier, penalties),
+    resultQty,
+    craftType,
+    jobLevel,
+    resultUnitPrice,
+    velocity,
+    ingredients: costs,
+    grossRevenue,
+    cost: totalCost,
+    taxRateUsed: DEFAULT_TAX_RATE,
+  }
+}
+
+export const CRAFT_OVERALL_LIMIT = 200
+export const CRAFT_PER_JOB_LIMIT = 50
+
+function craftNet(c: CraftOpportunity): number {
+  return c.grossRevenue * (1 - c.taxRateUsed) - c.cost
+}
+
+function byNetDesc(a: CraftOpportunity, b: CraftOpportunity): number {
+  const d = craftNet(b) - craftNet(a)
+  if (d !== 0) return d
+  if (b.resultUnitPrice !== a.resultUnitPrice) return b.resultUnitPrice - a.resultUnitPrice
+  return a.recipeId - b.recipeId
+}
+
+/**
+ * Retains the overall top N plus the top N per craft type.
+ *
+ * A flat global cut breaks the client-side crafter-level filter: if the top 200
+ * are dominated by two or three disciplines, a player whose only crafter is
+ * Culinarian sees an empty tab while profitable Culinarian recipes sit below
+ * the line. Guaranteeing every job some representation costs a few hundred rows.
+ */
+export function rankCrafts(
+  rows: CraftOpportunity[],
+  opts: { overall?: number; perJob?: number } = {}
+): CraftOpportunity[] {
+  const overall = opts.overall ?? CRAFT_OVERALL_LIMIT
+  const perJob = opts.perJob ?? CRAFT_PER_JOB_LIMIT
+
+  const sorted = [...rows].sort(byNetDesc)
+  const picked = new Map<number, CraftOpportunity>()
+
+  for (const c of sorted.slice(0, overall)) picked.set(c.recipeId, c)
+
+  const perType = new Map<string, number>()
+  for (const c of sorted) {
+    const key = c.craftType ?? "Unknown"
+    const seen = perType.get(key) ?? 0
+    if (seen >= perJob) continue
+    perType.set(key, seen + 1)
+    picked.set(c.recipeId, c)
+  }
+
+  return [...picked.values()].sort(byNetDesc)
 }
 
 export function rankArbitrage(

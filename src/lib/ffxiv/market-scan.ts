@@ -12,17 +12,23 @@ import {
 import {
   avgPriceOf,
   buildArbitrage,
+  buildCraft,
   buildShortlist,
   buildSupplyGap,
   candidateKey,
+  ingredientUnitPrice,
   rankArbitrage,
+  rankCrafts,
   rankSupplyGaps,
   regionMinListingOf,
   velocityOf,
   type ArbitrageOpportunity,
   type Candidate,
+  type CraftOpportunity,
   type SupplyGapOpportunity,
 } from "./opportunities"
+import { loadRecipeCache, type CachedRecipe } from "./recipes"
+import { createServiceClient } from "@/lib/supabase/service"
 
 export const DEFAULT_MIN_VELOCITY = 1.0
 export const LEADERBOARD_LIMIT = 50
@@ -90,12 +96,102 @@ export interface ScanResult {
   mostValuable: ItemMarketStat[]
   supplyGaps: SupplyGapOpportunity[]
   arbitrage: ArbitrageOpportunity[]
+  craftingProfits: CraftOpportunity[]
+  /** False when recipe_cache is empty — the Crafting tab degrades, others don't. */
+  recipesAvailable: boolean
   taxRates: TaxRates
   shortlistSize: number
   itemsScanned: number
   itemsFailed: number
   scanDurationMs: number
   minVelocityThreshold: number
+}
+
+/** Static Item flags needed by the craft rules, keyed by item id. */
+interface ItemFlags {
+  canBeHq: boolean | null
+  isUntradable: boolean | null
+}
+
+async function loadItemFlags(itemIds: number[]): Promise<Map<number, ItemFlags>> {
+  const flags = new Map<number, ItemFlags>()
+  if (itemIds.length === 0) return flags
+
+  const supabase = createServiceClient()
+  const PAGE = 1000
+  for (let i = 0; i < itemIds.length; i += PAGE) {
+    const { data, error } = await supabase
+      .from("item_catalog")
+      .select("item_id, can_be_hq, is_untradable")
+      .in("item_id", itemIds.slice(i, i + PAGE))
+
+    if (error) {
+      console.error("[market-scan] item flag load failed:", error.message)
+      break
+    }
+    for (const r of data ?? []) {
+      flags.set(r.item_id, { canBeHq: r.can_be_hq, isUntradable: r.is_untradable })
+    }
+  }
+  return flags
+}
+
+/**
+ * Cheapest way to obtain one unit of each craftable ingredient, resolved to a
+ * bounded depth.
+ *
+ * Depth 2 mirrors how deep real crafting trees usefully go; beyond that the
+ * cost of resolution outweighs the accuracy gained. Truncation is logged rather
+ * than silently returning a cost that ignores a cheaper deeper path.
+ */
+function resolveSubCraftCosts(
+  recipes: CachedRecipe[],
+  aggByItemId: Map<number, UniversalisAggregatedItem>,
+  maxDepth = 2
+): Map<number, number> {
+  const byResult = new Map<number, CachedRecipe>()
+  for (const r of recipes) {
+    // Cheapest-yielding recipe wins when an item has several.
+    const existing = byResult.get(r.resultItemId)
+    if (!existing || r.ingredients.length < existing.ingredients.length) {
+      byResult.set(r.resultItemId, r)
+    }
+  }
+
+  const memo = new Map<number, number>()
+  let truncated = 0
+
+  const costOf = (itemId: number, depth: number): number | null => {
+    if (memo.has(itemId)) return memo.get(itemId) as number
+
+    const recipe = byResult.get(itemId)
+    if (!recipe) return null
+    if (depth >= maxDepth) {
+      truncated++
+      return null
+    }
+
+    let total = 0
+    for (const ing of recipe.ingredients) {
+      const bought = ingredientUnitPrice(aggByItemId.get(ing.itemId))
+      const deeper = costOf(ing.itemId, depth + 1)
+      const unit =
+        deeper != null && (bought == null || deeper < bought.price) ? deeper : bought?.price ?? null
+      if (unit == null) return null
+      total += unit * ing.qty
+    }
+
+    const perUnit = total / Math.max(1, recipe.resultQty)
+    memo.set(itemId, perUnit)
+    return perUnit
+  }
+
+  for (const r of recipes) costOf(r.resultItemId, 0)
+
+  if (truncated > 0) {
+    console.info(`[market-scan] sub-craft depth cap hit ${truncated} times (max depth ${maxDepth})`)
+  }
+  return memo
 }
 
 const QUALITIES: Quality[] = ["nq", "hq"]
@@ -193,11 +289,63 @@ export async function scanWorld(world: string, opts?: { minVelocity?: number }):
     if (row) supplyGapRows.push(row)
   }
 
+  // --- Crafting -------------------------------------------------------------
+  // Reads the pre-warmed recipe cache; never fetches recipes itself. An empty
+  // cache degrades this one tab and leaves the rest of the scan untouched.
+  const recipes = await loadRecipeCache()
+  const craftRows: CraftOpportunity[] = []
+  const skipCounts = new Map<string, number>()
+
+  if (recipes.length > 0) {
+    const craftItemIds = [
+      ...new Set(recipes.flatMap((r) => [r.resultItemId, ...r.ingredients.map((i) => i.itemId)])),
+    ]
+    const flags = await loadItemFlags(craftItemIds)
+    const subCraft = resolveSubCraftCosts(recipes, byItemId)
+
+    const canBeHq = (id: number) => flags.get(id)?.canBeHq ?? null
+    const isUntradable = (id: number) => flags.get(id)?.isUntradable ?? null
+    const subCraftCost = (id: number) => subCraft.get(id) ?? null
+
+    for (const recipe of recipes) {
+      for (const quality of QUALITIES) {
+        const result = buildCraft({
+          recipeId: recipe.recipeId,
+          resultItemId: recipe.resultItemId,
+          resultQty: recipe.resultQty,
+          craftType: recipe.craftType,
+          jobLevel: recipe.jobLevel,
+          ingredients: recipe.ingredients,
+          quality,
+          aggByItemId: byItemId,
+          canBeHq,
+          isUntradable,
+          subCraftCost,
+          partialBatch: failedSet.has(recipe.resultItemId),
+          now,
+        })
+
+        if ("skipped" in result) {
+          skipCounts.set(result.skipped, (skipCounts.get(result.skipped) ?? 0) + 1)
+        } else {
+          craftRows.push(result)
+        }
+      }
+    }
+
+    console.info(
+      `[market-scan] ${world}: ${craftRows.length} craft rows from ${recipes.length} recipes;`,
+      Object.fromEntries(skipCounts)
+    )
+  }
+
   return {
     bestSellers: rankBestSellers(stats),
     mostValuable: rankMostValuable(stats, { minVelocity }),
     supplyGaps: rankSupplyGaps(supplyGapRows),
     arbitrage: rankArbitrage(arbitrageRows),
+    craftingProfits: rankCrafts(craftRows),
+    recipesAvailable: recipes.length > 0,
     taxRates,
     shortlistSize: shortlist.length,
     itemsScanned: items.length,

@@ -5,7 +5,11 @@ import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/service"
 import { resolveItemCatalog } from "@/lib/ffxiv/item-catalog"
 import { scanWorld, type ItemMarketStat, type ScanResult } from "@/lib/ffxiv/market-scan"
-import type { ArbitrageOpportunity, SupplyGapOpportunity } from "@/lib/ffxiv/opportunities"
+import type {
+  ArbitrageOpportunity,
+  CraftOpportunity,
+  SupplyGapOpportunity,
+} from "@/lib/ffxiv/opportunities"
 import type { TaxRates } from "@/lib/ffxiv/universalis"
 import { fetchWorldTopology } from "@/lib/ffxiv/universalis"
 import { WORLDS, DATA_CENTERS } from "@/lib/ffxiv/xivapi"
@@ -55,6 +59,7 @@ type ScanRow = {
   most_valuable: ItemMarketStat[]
   supply_gaps: unknown
   arbitrage: unknown
+  crafting_profits: unknown
   tax_rates: TaxRates | null
   shortlist_size: number | null
   refresh_started_at: string | null
@@ -64,8 +69,8 @@ type ScanRow = {
 
 const SCAN_COLUMNS =
   "world, data_center, scanned_at, scan_completed_at, min_velocity_threshold, " +
-  "best_sellers, most_valuable, supply_gaps, arbitrage, tax_rates, shortlist_size, " +
-  "refresh_started_at, refresh_error, last_manual_refresh_at"
+  "best_sellers, most_valuable, supply_gaps, arbitrage, crafting_profits, " +
+  "tax_rates, shortlist_size, refresh_started_at, refresh_error, last_manual_refresh_at"
 
 // ---------------------------------------------------------------------------
 // Enrichment
@@ -119,9 +124,6 @@ async function acquireLease(
  * Success write. Refreshes the shipped scanner columns as well as the new
  * opportunity ones — dropping them would silently freeze the Best Sellers and
  * Most Valuable tabs at whatever they last held.
- *
- * Deliberately does NOT touch crafting_profits: that column arrives with
- * migration 016 in Phase 2 and does not exist yet.
  */
 async function writeSuccess(
   supabase: ServiceClient,
@@ -147,6 +149,8 @@ async function writeSuccess(
       arbitrage: wrap(result.arbitrage),
       tax_rates: result.taxRates,
       shortlist_size: result.shortlistSize,
+      // crafting (migration 016)
+      crafting_profits: wrap(result.craftingProfits),
       // state
       scan_completed_at: nowIso,
       refresh_error: null,
@@ -255,13 +259,14 @@ async function shapeResponse(row: ScanRow, opts: ResponseOpts = {}) {
   const mostValuable = row.most_valuable ?? []
   const supplyGaps = readPayload<SupplyGapOpportunity>(row.supply_gaps)
   const arbitrage = readPayload<ArbitrageOpportunity>(row.arbitrage)
+  const crafting = readPayload<CraftOpportunity>(row.crafting_profits)
 
   // `failed` has no usable payload by definition — don't ship empty arrays that
   // could read as "we looked and found nothing".
   const payloadless = status === "failed"
   const lookup = payloadless
     ? () => ({ name: "", iconUrl: null })
-    : await buildNameLookup(bestSellers, mostValuable, supplyGaps, arbitrage)
+    : await buildNameLookup(bestSellers, mostValuable, supplyGaps, arbitrage, crafting)
 
   // Arbitrage rows carry a numeric buyWorldId from the aggregated payload;
   // resolve it here so the client never needs the topology.
@@ -295,6 +300,10 @@ async function shapeResponse(row: ScanRow, opts: ResponseOpts = {}) {
     arbitrage: payloadless
       ? []
       : withRank(arbitrage, lookup).map((r) => ({ ...r, buyWorldName: worldName(r.buyWorldId) })),
+    craftingProfits: payloadless ? [] : withRank(crafting, lookup),
+    // An empty payload here means the recipe cache has never been warmed, which
+    // is a different thing from "no profitable crafts" and reads differently.
+    recipesAvailable: crafting.length > 0,
   })
 }
 

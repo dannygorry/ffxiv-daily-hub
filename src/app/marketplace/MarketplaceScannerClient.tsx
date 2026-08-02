@@ -69,6 +69,24 @@ interface ArbitrageRow extends OpportunityRow {
   sameDataCenter: boolean
 }
 
+interface CraftIngredient {
+  itemId: number
+  qty: number
+  unitPrice: number
+  estimated: boolean
+  crafted: boolean
+}
+
+interface CraftRow extends OpportunityRow {
+  recipeId: number
+  resultQty: number
+  craftType: string | null
+  jobLevel: number | null
+  resultUnitPrice: number
+  velocity: number
+  ingredients: CraftIngredient[]
+}
+
 interface ScanResponse {
   world: string
   dataCenter: string
@@ -80,10 +98,12 @@ interface ScanResponse {
   refreshing: boolean
   taxRates: Record<string, number>
   shortlistSize: number
+  recipesAvailable: boolean
   bestSellers: LeaderboardRow[]
   mostValuable: LeaderboardRow[]
   supplyGaps: SupplyGapRow[]
   arbitrage: ArbitrageRow[]
+  craftingProfits: CraftRow[]
 }
 
 // ---------------------------------------------------------------------------
@@ -337,12 +357,112 @@ function ArbitrageTable({ rows, taxRate }: { rows: ArbitrageRow[]; taxRate: numb
   )
 }
 
+function CraftTable({
+  rows,
+  taxRate,
+  crafterLevels,
+  onlyMine,
+}: {
+  rows: CraftRow[]
+  taxRate: number
+  crafterLevels: Record<string, number> | null
+  onlyMine: boolean
+}) {
+  const priced = useMemo(() => {
+    const filtered =
+      onlyMine && crafterLevels
+        ? rows.filter((r) => {
+            if (!r.craftType) return false
+            const level = crafterLevels[r.craftType]
+            if (level == null) return false
+            return r.jobLevel == null || r.jobLevel <= level
+          })
+        : rows
+    return filtered
+      .map((r) => ({ ...r, net: r.grossRevenue * (1 - taxRate) - r.cost }))
+      .sort((a, b) => (b.net !== a.net ? b.net - a.net : a.recipeId - b.recipeId))
+  }, [rows, taxRate, crafterLevels, onlyMine])
+
+  if (priced.length === 0) {
+    return (
+      <EmptyState>
+        {onlyMine && crafterLevels
+          ? "No profitable recipes at your current crafter levels. Turn off the filter to see everything."
+          : "No profitable recipes found on this world right now."}
+      </EmptyState>
+    )
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-muted-foreground border-b border-border">
+            <th className="py-2 pr-2 font-medium w-8">#</th>
+            <th className="py-2 pr-2 font-medium">Craft</th>
+            <th className="py-2 pr-2 font-medium">Job</th>
+            <th className="py-2 pr-2 font-medium text-right">Yield</th>
+            <th className="py-2 pr-2 font-medium text-right">Materials</th>
+            <th className="py-2 pr-2 font-medium text-right">Sells for</th>
+            <th className="py-2 pr-2 font-medium text-right">Net profit</th>
+            <th className="py-2 pr-2 font-medium text-right">Sales/day</th>
+          </tr>
+        </thead>
+        <tbody>
+          {priced.map((row) => (
+            <tr key={`${row.recipeId}-${row.quality}`} className="border-b border-border/50">
+              <td className="py-2 pr-2 text-muted-foreground align-top">{row.rank}</td>
+              <td className="py-2 pr-2">
+                <ItemCell row={row} />
+                <ConfidenceChips confidence={row.confidence} />
+                {row.quality === "hq" && (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Assumes NQ materials; does not model HQ success chance.
+                  </p>
+                )}
+              </td>
+              <td className="py-2 pr-2 align-top">
+                {row.craftType ?? "—"}
+                {row.jobLevel != null && (
+                  <span className="text-muted-foreground"> · Lv{row.jobLevel}</span>
+                )}
+              </td>
+              <td className="py-2 pr-2 text-right align-top">
+                {row.resultQty > 1 ? `${row.resultQty}x` : "1x"}
+              </td>
+              <td className="py-2 pr-2 text-right align-top">{gil(row.cost)}</td>
+              <td className="py-2 pr-2 text-right align-top">
+                {gil(row.grossRevenue)}
+                {row.resultQty > 1 && (
+                  <span className="text-muted-foreground"> ({gil(row.resultUnitPrice)} ea)</span>
+                )}
+              </td>
+              <td className="py-2 pr-2 text-right align-top font-medium">{gil(row.net)}</td>
+              <td className="py-2 pr-2 text-right align-top">{rate(row.velocity)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
-export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: string | null }) {
+export function MarketplaceScannerClient({
+  defaultWorld,
+  crafterLevels = null,
+  characterName = null,
+}: {
+  defaultWorld: string | null
+  /** Null when unknown — no linked character, or no cached Lodestone data. */
+  crafterLevels?: Record<string, number> | null
+  characterName?: string | null
+}) {
   const [world, setWorld] = useState<string | null>(defaultWorld)
+  const [onlyMyCrafts, setOnlyMyCrafts] = useState(true)
   const [data, setData] = useState<ScanResponse | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   // Errors are world-scoped so switching worlds clears the old one without an
@@ -554,6 +674,7 @@ export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: strin
             <TabsList>
               <TabsTrigger value="supply-gaps">Supply Gaps</TabsTrigger>
               <TabsTrigger value="arbitrage">Arbitrage</TabsTrigger>
+              <TabsTrigger value="crafting">Crafting</TabsTrigger>
               <TabsTrigger value="best-sellers">Best Sellers</TabsTrigger>
               <TabsTrigger value="most-valuable">Most Valuable</TabsTrigger>
             </TabsList>
@@ -585,6 +706,49 @@ export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: strin
                     already be gone — verify travel availability before committing.
                   </p>
                   <ArbitrageTable rows={view.arbitrage} taxRate={taxRate} />
+                </>
+              )}
+            </TabsContent>
+
+            <TabsContent value="crafting">
+              {showSkeleton ? (
+                <Skeleton />
+              ) : !view.recipesAvailable ? (
+                <EmptyState>
+                  Recipe data hasn&apos;t been loaded yet, so crafting profit can&apos;t be
+                  calculated. The other tabs are unaffected.
+                </EmptyState>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+                      <Info className="size-3.5 mt-0.5 shrink-0" />
+                      Materials are costed at NQ prices, since HQ materials raise quality but
+                      aren&apos;t required. Net profit excludes your time.
+                    </p>
+                    {crafterLevels ? (
+                      <Button
+                        variant={onlyMyCrafts ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setOnlyMyCrafts((v) => !v)}
+                      >
+                        {onlyMyCrafts
+                          ? `Only ${characterName ?? "my"} crafters`
+                          : "Showing all recipes"}
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        Showing all recipes — link a character and generate its card to filter by
+                        your crafter levels.
+                      </span>
+                    )}
+                  </div>
+                  <CraftTable
+                    rows={view.craftingProfits}
+                    taxRate={taxRate}
+                    crafterLevels={crafterLevels}
+                    onlyMine={onlyMyCrafts}
+                  />
                 </>
               )}
             </TabsContent>
