@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -14,96 +14,170 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { RefreshCw, Coins } from "lucide-react"
+import { RefreshCw, Coins, TriangleAlert, Info } from "lucide-react"
 import { DATA_CENTERS } from "@/lib/ffxiv/xivapi"
 
-interface LeaderboardRow {
+// ---------------------------------------------------------------------------
+// Types (mirror of the API response)
+// ---------------------------------------------------------------------------
+
+type Quality = "nq" | "hq"
+type Status = "initializing" | "refreshing" | "ready" | "failed"
+
+interface Confidence {
+  tier: "fresh" | "aging" | "excluded"
+  score: number
+  penalties: string[]
+}
+
+interface BaseRow {
   itemId: number
   rank: number
   name: string
   iconUrl: string | null
-  nqAvgPrice: number | null
-  hqAvgPrice: number | null
+}
+
+interface LeaderboardRow extends BaseRow {
   value: number | null
-  valueQuality: "nq" | "hq" | null
+  valueQuality: Quality | null
   velocity: number
 }
 
-interface LeaderboardResponse {
+interface OpportunityRow extends BaseRow {
+  quality: Quality
+  confidence: Confidence
+  grossRevenue: number
+  cost: number
+  taxRateUsed: number
+}
+
+interface SupplyGapRow extends OpportunityRow {
+  unitsForSale: number
+  listingsCount: number
+  velocity: number
+  daysOfSupply: number | null
+  avgSalePrice: number
+  unmetDemandPerDay: number
+}
+
+interface ArbitrageRow extends OpportunityRow {
+  buyWorldId: number
+  buyWorldName: string
+  buyPrice: number
+  homeSalePrice: number
+  velocity: number
+  sameDataCenter: boolean
+}
+
+interface ScanResponse {
   world: string
   dataCenter: string
-  scannedAt: string
-  stale: boolean
+  status: Status
+  throttled: boolean
+  nextRefreshAt: string | null
+  scannedAt: string | null
+  refreshError: string | null
   refreshing: boolean
-  minVelocityThreshold: number
+  taxRates: Record<string, number>
+  shortlistSize: number
   bestSellers: LeaderboardRow[]
   mostValuable: LeaderboardRow[]
+  supplyGaps: SupplyGapRow[]
+  arbitrage: ArbitrageRow[]
 }
 
-// A background rescan of a world takes ~50-90s (measured live against the real
-// ~16,800-item marketable catalog), so the poll window needs to comfortably outlast that.
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 const POLL_INTERVAL_MS = 8000
-const MAX_POLL_ATTEMPTS = 15
+const MAX_POLL_ATTEMPTS = 20
+const DEFAULT_TAX_RATE = 0.05
 
-function formatGil(n: number | null): string {
-  if (n == null) return "—"
-  return Math.round(n).toLocaleString()
+/** Plain-language copy for each machine-readable penalty code. */
+const PENALTY_LABELS: Record<string, { short: string; detail: string }> = {
+  stale_region_source: {
+    short: "Stale seller data",
+    detail: "The seller world's prices were uploaded well before your home world's — the listing may be long gone.",
+  },
+  unknown_region_freshness: {
+    short: "Unverified seller data",
+    detail: "We couldn't confirm how fresh the seller world's data is.",
+  },
+  low_sale_count: {
+    short: "Few sales",
+    detail: "Under about four sales in the sampled window, so the rate is noisy.",
+  },
+  thin_listings: {
+    short: "Thin market",
+    detail: "One or two sellers control the entire price.",
+  },
+  outlier_listing_rejected: {
+    short: "Outlier ignored",
+    detail: "An implausibly high listing was excluded from the maths.",
+  },
+  estimated_ingredient_price: {
+    short: "Estimated cost",
+    detail: "No current listing, so a historical average was used instead.",
+  },
+  partial_batch: {
+    short: "Partial data",
+    detail: "Some requests for this item failed during the scan.",
+  },
 }
 
-function formatVelocity(n: number): string {
-  return n.toFixed(1)
-}
+// ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
 
-function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
-  if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">No qualifying items found.</p>
-  }
+const gil = (n: number | null) => (n == null ? "—" : `${Math.round(n).toLocaleString()}`)
+const rate = (n: number) => n.toFixed(n < 10 ? 1 : 0)
 
+function ItemCell({ row }: { row: BaseRow & { quality?: Quality } }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-muted-foreground border-b border-border">
-            <th className="py-2 pr-2 font-medium">#</th>
-            <th className="py-2 pr-2 font-medium">Item</th>
-            <th className="py-2 pr-2 font-medium text-right">Avg. price</th>
-            <th className="py-2 pr-2 font-medium text-right">Sales/day</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.itemId} className="border-b border-border/50">
-              <td className="py-2 pr-2 text-muted-foreground">{row.rank}</td>
-              <td className="py-2 pr-2">
-                <div className="flex items-center gap-2">
-                  {row.iconUrl ? (
-                    <Image src={row.iconUrl} alt="" width={28} height={28} className="rounded" unoptimized />
-                  ) : (
-                    <div className="size-7 rounded bg-muted shrink-0" />
-                  )}
-                  <span>{row.name}</span>
-                </div>
-              </td>
-              <td className="py-2 pr-2 text-right">
-                <div className="flex items-center justify-end gap-1.5">
-                  <span>{formatGil(row.value)} gil</span>
-                  {row.valueQuality && (
-                    <Badge variant={row.valueQuality === "hq" ? "default" : "secondary"} className="text-[10px]">
-                      {row.valueQuality.toUpperCase()}
-                    </Badge>
-                  )}
-                </div>
-              </td>
-              <td className="py-2 pr-2 text-right">{formatVelocity(row.velocity)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="flex items-center gap-2">
+      {row.iconUrl ? (
+        <Image src={row.iconUrl} alt="" width={28} height={28} className="rounded" unoptimized />
+      ) : (
+        <div className="size-7 rounded bg-muted shrink-0" />
+      )}
+      <span className="truncate">{row.name}</span>
+      {row.quality === "hq" && (
+        <Badge variant="default" className="text-[10px] shrink-0">HQ</Badge>
+      )}
     </div>
   )
 }
 
-function LeaderboardSkeleton() {
+function ConfidenceChips({ confidence }: { confidence: Confidence }) {
+  if (confidence.penalties.length === 0 && confidence.tier === "fresh") return null
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {confidence.tier === "aging" && (
+        <span
+          className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+          title="This data is between 24 and 72 hours old."
+        >
+          Aging data
+        </span>
+      )}
+      {confidence.penalties.map((p) => {
+        const label = PENALTY_LABELS[p] ?? { short: p, detail: p }
+        return (
+          <span
+            key={p}
+            className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+            title={label.detail}
+          >
+            {label.short}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function Skeleton() {
   return (
     <div className="space-y-2 py-2">
       {Array.from({ length: 8 }).map((_, i) => (
@@ -113,38 +187,211 @@ function LeaderboardSkeleton() {
   )
 }
 
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm text-muted-foreground py-8 text-center">{children}</p>
+}
+
+// ---------------------------------------------------------------------------
+// Tables
+// ---------------------------------------------------------------------------
+
+function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
+  if (rows.length === 0) return <EmptyState>No qualifying items found on this world.</EmptyState>
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-muted-foreground border-b border-border">
+            <th className="py-2 pr-2 font-medium w-8">#</th>
+            <th className="py-2 pr-2 font-medium">Item</th>
+            <th className="py-2 pr-2 font-medium text-right">Avg. price</th>
+            <th className="py-2 pr-2 font-medium text-right">Sales/day</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.itemId}-${row.valueQuality}`} className="border-b border-border/50">
+              <td className="py-2 pr-2 text-muted-foreground">{row.rank}</td>
+              <td className="py-2 pr-2">
+                <ItemCell row={{ ...row, quality: row.valueQuality ?? undefined }} />
+              </td>
+              <td className="py-2 pr-2 text-right">{gil(row.value)}</td>
+              <td className="py-2 pr-2 text-right">{rate(row.velocity)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SupplyGapTable({ rows }: { rows: SupplyGapRow[] }) {
+  if (rows.length === 0) {
+    return <EmptyState>No undersupplied items found. That&apos;s a normal result — tight markets are rare.</EmptyState>
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-muted-foreground border-b border-border">
+            <th className="py-2 pr-2 font-medium w-8">#</th>
+            <th className="py-2 pr-2 font-medium">Item</th>
+            <th className="py-2 pr-2 font-medium text-right">Listed</th>
+            <th className="py-2 pr-2 font-medium text-right">Sales/day</th>
+            <th className="py-2 pr-2 font-medium text-right">Days of supply</th>
+            <th className="py-2 pr-2 font-medium text-right">Avg. price</th>
+            <th className="py-2 pr-2 font-medium text-right">Demand/day</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.itemId}-${row.quality}`} className="border-b border-border/50">
+              <td className="py-2 pr-2 text-muted-foreground align-top">{row.rank}</td>
+              <td className="py-2 pr-2">
+                <ItemCell row={row} />
+                <ConfidenceChips confidence={row.confidence} />
+              </td>
+              <td className="py-2 pr-2 text-right align-top">
+                {row.unitsForSale === 0 ? (
+                  <Badge variant="default" className="text-[10px]">None listed</Badge>
+                ) : (
+                  <span>
+                    {row.unitsForSale.toLocaleString()}
+                    <span className="text-muted-foreground"> / {row.listingsCount}</span>
+                  </span>
+                )}
+              </td>
+              <td className="py-2 pr-2 text-right align-top">{rate(row.velocity)}</td>
+              <td className="py-2 pr-2 text-right align-top">
+                {row.daysOfSupply == null ? "—" : row.daysOfSupply.toFixed(2)}
+              </td>
+              <td className="py-2 pr-2 text-right align-top">{gil(row.avgSalePrice)}</td>
+              <td className="py-2 pr-2 text-right align-top">{gil(row.unmetDemandPerDay)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ArbitrageTable({ rows, taxRate }: { rows: ArbitrageRow[]; taxRate: number }) {
+  // Net is recomputed here rather than read from the payload: the cached rows
+  // were ranked at the default 5%, and a 3% home city changes both the margin
+  // and the order.
+  const priced = useMemo(
+    () =>
+      [...rows]
+        .map((r) => ({ ...r, net: r.grossRevenue * (1 - taxRate) - r.cost }))
+        .sort((a, b) => {
+          if (b.net !== a.net) return b.net - a.net
+          if (a.sameDataCenter !== b.sameDataCenter) return a.sameDataCenter ? -1 : 1
+          return a.itemId - b.itemId
+        }),
+    [rows, taxRate]
+  )
+
+  if (priced.length === 0) {
+    return <EmptyState>No profitable cross-world buys found for this world right now.</EmptyState>
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-muted-foreground border-b border-border">
+            <th className="py-2 pr-2 font-medium w-8">#</th>
+            <th className="py-2 pr-2 font-medium">Item</th>
+            <th className="py-2 pr-2 font-medium">Buy from</th>
+            <th className="py-2 pr-2 font-medium text-right">Buy price</th>
+            <th className="py-2 pr-2 font-medium text-right">Sells here</th>
+            <th className="py-2 pr-2 font-medium text-right">Net / unit</th>
+            <th className="py-2 pr-2 font-medium text-right">Sales/day</th>
+          </tr>
+        </thead>
+        <tbody>
+          {priced.map((row) => (
+            <tr key={`${row.itemId}-${row.quality}`} className="border-b border-border/50">
+              <td className="py-2 pr-2 text-muted-foreground align-top">{row.rank}</td>
+              <td className="py-2 pr-2">
+                <ItemCell row={row} />
+                <ConfidenceChips confidence={row.confidence} />
+              </td>
+              <td className="py-2 pr-2 align-top">
+                <div className="flex items-center gap-1.5">
+                  <span>{row.buyWorldName}</span>
+                  <Badge variant={row.sameDataCenter ? "secondary" : "outline"} className="text-[10px]">
+                    {row.sameDataCenter ? "Same DC" : "Cross-DC"}
+                  </Badge>
+                </div>
+              </td>
+              <td className="py-2 pr-2 text-right align-top">{gil(row.buyPrice)}</td>
+              <td className="py-2 pr-2 text-right align-top">{gil(row.homeSalePrice)}</td>
+              <td className="py-2 pr-2 text-right align-top font-medium">{gil(row.net)}</td>
+              <td className="py-2 pr-2 text-right align-top">{rate(row.velocity)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: string | null }) {
   const [world, setWorld] = useState<string | null>(defaultWorld)
-  const [data, setData] = useState<LeaderboardResponse | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [data, setData] = useState<ScanResponse | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Errors are world-scoped so switching worlds clears the old one without an
+  // extra setState in the effect.
+  const [error, setError] = useState<{ world: string; message: string } | null>(null)
+  // Keyed by city, not by rate: three cities all charge 5%, and a Select whose
+  // options share a value matches every one of them, stacking all three labels
+  // into the trigger.
+  const [taxCity, setTaxCity] = useState<string | null>(null)
   const pollAttempts = useRef(0)
 
-  const load = useCallback(async (targetWorld: string) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await fetch(`/api/marketplace/leaderboard?world=${encodeURIComponent(targetWorld)}`)
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? "Failed to load marketplace data")
-      setData(json)
-      pollAttempts.current = 0
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load marketplace data")
-    } finally {
-      setLoading(false)
+  const activeError = error && error.world === world ? error.message : null
+  // Loading is derived rather than stored: if the response we hold isn't for
+  // the selected world, we're still fetching it. Storing it would mean calling
+  // setState synchronously in the effect body and cascading a render.
+  const showingCurrentWorld = data?.world === world
+  const isLoadingWorld = world != null && !showingCurrentWorld && !activeError
+  // Everything the UI renders reads `view`, never `data`: on a world switch the
+  // previous world's response is still in state, and showing it under the new
+  // world's name would be quietly wrong.
+  const view = showingCurrentWorld ? data : null
+
+  useEffect(() => {
+    if (!world) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/marketplace/leaderboard?world=${encodeURIComponent(world)}`)
+        const json = await res.json()
+        if (cancelled) return
+        if (!res.ok) throw new Error(json.error ?? "Failed to load marketplace data")
+        setError(null)
+        setData(json)
+        pollAttempts.current = 0
+      } catch (err) {
+        if (cancelled) return
+        setError({ world, message: err instanceof Error ? err.message : "Failed to load marketplace data" })
+      }
+    })()
+    return () => {
+      cancelled = true
     }
-  }, [])
+  }, [world])
 
+  // Poll while a scan is in flight — both the first scan of a world and a
+  // background refresh of a stale one.
+  const inFlight = data?.status === "initializing" || data?.status === "refreshing"
   useEffect(() => {
-    if (world) load(world)
-  }, [world, load])
-
-  // Stale-while-revalidate: if the server is refreshing this world's cache in
-  // the background, poll a few times until it flips to fresh.
-  useEffect(() => {
-    if (!data?.refreshing || !world) return
+    if (!inFlight || !world) return
     if (pollAttempts.current >= MAX_POLL_ATTEMPTS) return
 
     const timer = setTimeout(async () => {
@@ -154,12 +401,12 @@ export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: strin
         const json = await res.json()
         if (res.ok) setData(json)
       } catch {
-        // Ignore — will retry on the next poll tick, or give up after MAX_POLL_ATTEMPTS.
+        // Transient; the next tick retries.
       }
     }, POLL_INTERVAL_MS)
 
     return () => clearTimeout(timer)
-  }, [data?.refreshing, world])
+  }, [inFlight, data, world])
 
   const handleRefresh = useCallback(async () => {
     if (!world) return
@@ -170,14 +417,35 @@ export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: strin
         method: "PUT",
       })
       const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? "Failed to refresh marketplace data")
+      if (!res.ok) throw new Error(json.error ?? "Failed to refresh")
+      setError(null)
       setData(json)
+      pollAttempts.current = 0
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to refresh marketplace data")
+      setError({ world, message: err instanceof Error ? err.message : "Failed to refresh" })
     } finally {
       setRefreshing(false)
     }
   }, [world])
+
+  const taxCities = useMemo(() => {
+    const entries = Object.entries(view?.taxRates ?? {})
+    return entries.length > 0 ? entries : null
+  }, [view?.taxRates])
+
+  // Falls back to the worst-case 5% until a city is chosen, matching the rate
+  // the server ranked with.
+  const taxRate = useMemo(() => {
+    if (!taxCity) return DEFAULT_TAX_RATE
+    const pct = view?.taxRates?.[taxCity]
+    return typeof pct === "number" ? pct / 100 : DEFAULT_TAX_RATE
+  }, [taxCity, view?.taxRates])
+
+  const nextRefreshLabel = view?.nextRefreshAt
+    ? new Date(view.nextRefreshAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : null
+
+  const showSkeleton = isLoadingWorld || view?.status === "initializing"
 
   return (
     <div className="space-y-6">
@@ -187,13 +455,31 @@ export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: strin
             <Coins className="size-6 text-primary" /> Marketplace Scanner
           </h1>
           <p className="text-sm text-muted-foreground">
-            Best-selling and most valuable items on a world&apos;s market board.
+            Best sellers, undersupplied items, and cross-world buys for a world&apos;s market board.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          {taxCities && (
+            <Select value={taxCity ?? undefined} onValueChange={setTaxCity}>
+              <SelectTrigger className="w-[190px]" aria-label="Home city tax rate">
+                <SelectValue placeholder={`Sell from — ${DEFAULT_TAX_RATE * 100}%`} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectLabel>Sell from (tax)</SelectLabel>
+                  {taxCities.map(([city, pct]) => (
+                    <SelectItem key={city} value={city}>
+                      {city} — {pct}%
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          )}
+
           <Select value={world ?? undefined} onValueChange={setWorld}>
-            <SelectTrigger className="w-[220px]">
+            <SelectTrigger className="w-[200px]" aria-label="World">
               <SelectValue placeholder="Select a world" />
             </SelectTrigger>
             <SelectContent>
@@ -201,9 +487,7 @@ export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: strin
                 <SelectGroup key={dc}>
                   <SelectLabel>{dc}</SelectLabel>
                   {worlds.map((w) => (
-                    <SelectItem key={w} value={w}>
-                      {w}
-                    </SelectItem>
+                    <SelectItem key={w} value={w}>{w}</SelectItem>
                   ))}
                 </SelectGroup>
               ))}
@@ -214,7 +498,7 @@ export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: strin
             variant="outline"
             size="icon"
             onClick={handleRefresh}
-            disabled={!world || refreshing || loading}
+            disabled={!world || refreshing || isLoadingWorld}
             aria-label="Refresh"
           >
             <RefreshCw className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
@@ -223,46 +507,94 @@ export function MarketplaceScannerClient({ defaultWorld }: { defaultWorld: strin
       </div>
 
       {!world && (
-        <p className="text-sm text-muted-foreground">Pick a world above to see its marketplace leaderboards.</p>
+        <p className="text-sm text-muted-foreground">Pick a world above to scan its market board.</p>
       )}
 
-      {loading && !data && (
+      {activeError && <p className="text-sm text-destructive">{activeError}</p>}
+
+      {/* "We haven't looked yet" — deliberately distinct from an empty result. */}
+      {view?.status === "initializing" && (
         <p className="text-sm text-muted-foreground">
-          Scanning the market board for the first time on this world — this can take up to a minute.
+          First scan for {view.world} — this can take up to two minutes. Results appear automatically.
         </p>
       )}
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {view?.status === "failed" && (
+        <div className="flex items-start gap-2 text-sm text-destructive">
+          <TriangleAlert className="size-4 mt-0.5 shrink-0" />
+          <span>
+            The first scan for {view.world} failed{view.refreshError ? `: ${view.refreshError}` : "."}
+            {view.throttled && nextRefreshLabel && ` You can retry at ${nextRefreshLabel}.`}
+          </span>
+        </div>
+      )}
 
-      {world && (
+      {view?.status === "ready" && view.refreshError && (
+        <div className="flex items-start gap-2 text-sm text-muted-foreground">
+          <TriangleAlert className="size-4 mt-0.5 shrink-0" />
+          <span>Showing the last successful scan — the most recent refresh failed.</span>
+        </div>
+      )}
+
+      {view?.throttled && view.status !== "failed" && nextRefreshLabel && (
+        <p className="text-sm text-muted-foreground">
+          Already refreshed recently. You can force another refresh at {nextRefreshLabel}.
+        </p>
+      )}
+
+      {world && view && view.status !== "failed" && (
         <>
-          {data && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Scanned {new Date(data.scannedAt).toLocaleString()}</span>
-              {data.refreshing && <Badge variant="secondary">Updating prices…</Badge>}
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {view.scannedAt && <span>Scanned {new Date(view.scannedAt).toLocaleString()}</span>}
+            {view.status === "refreshing" && <Badge variant="secondary">Updating prices…</Badge>}
+            {view.shortlistSize > 0 && <span>· {view.shortlistSize} items checked for supply</span>}
+          </div>
 
-          <Tabs defaultValue="best-sellers">
+          <Tabs defaultValue="supply-gaps">
             <TabsList>
+              <TabsTrigger value="supply-gaps">Supply Gaps</TabsTrigger>
+              <TabsTrigger value="arbitrage">Arbitrage</TabsTrigger>
               <TabsTrigger value="best-sellers">Best Sellers</TabsTrigger>
               <TabsTrigger value="most-valuable">Most Valuable</TabsTrigger>
             </TabsList>
-            <TabsContent value="best-sellers">
-              {loading || !data ? <LeaderboardSkeleton /> : <LeaderboardTable rows={data.bestSellers} />}
-            </TabsContent>
-            <TabsContent value="most-valuable">
-              {loading || !data ? (
-                <LeaderboardSkeleton />
+
+            <TabsContent value="supply-gaps">
+              {showSkeleton ? (
+                <Skeleton />
               ) : (
                 <>
-                  <p className="text-xs text-muted-foreground mb-2">
-                    Only items selling at least {data.minVelocityThreshold.toFixed(1)}/day qualify, so a single rare
-                    flip can&apos;t dominate the list.
+                  <p className="text-xs text-muted-foreground mb-2 flex items-start gap-1.5">
+                    <Info className="size-3.5 mt-0.5 shrink-0" />
+                    Items selling steadily with little or nothing listed. Demand/day ranks the
+                    opportunity — it is not a profit forecast, and prices are historical averages.
                   </p>
-                  <LeaderboardTable rows={data.mostValuable} />
+                  <SupplyGapTable rows={view.supplyGaps} />
                 </>
               )}
+            </TabsContent>
+
+            <TabsContent value="arbitrage">
+              {showSkeleton ? (
+                <Skeleton />
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground mb-2 flex items-start gap-1.5">
+                    <Info className="size-3.5 mt-0.5 shrink-0" />
+                    Buy on another world, sell on {view.world}. You can buy while visiting any data
+                    centre, but you can only sell at home. Listed prices are a snapshot and may
+                    already be gone — verify travel availability before committing.
+                  </p>
+                  <ArbitrageTable rows={view.arbitrage} taxRate={taxRate} />
+                </>
+              )}
+            </TabsContent>
+
+            <TabsContent value="best-sellers">
+              {showSkeleton ? <Skeleton /> : <LeaderboardTable rows={view.bestSellers} />}
+            </TabsContent>
+
+            <TabsContent value="most-valuable">
+              {showSkeleton ? <Skeleton /> : <LeaderboardTable rows={view.mostValuable} />}
             </TabsContent>
           </Tabs>
         </>

@@ -1,4 +1,4 @@
-import type { createClient } from "@/lib/supabase/server"
+import { createServiceClient } from "@/lib/supabase/service"
 
 const XIVAPI_BASE = "https://v2.xivapi.com/api"
 const XIVAPI_BATCH_SIZE = 100
@@ -55,13 +55,21 @@ async function fetchFromXivapi(itemIds: number[]): Promise<Map<number, ResolvedE
   return resolved
 }
 
+/**
+ * Resolves item names and icons, caching misses in `item_catalog`.
+ *
+ * Uses the service-role client rather than the caller's session: migration 015
+ * revoked insert/update on `item_catalog` from `authenticated`, so a
+ * session-scoped upsert would silently fail on every cache miss and the table
+ * would never fill.
+ */
 export async function resolveItemCatalog(
-  supabase: Awaited<ReturnType<typeof createClient>>,
   itemIds: number[]
 ): Promise<Map<number, CatalogEntry>> {
   const uniqueIds = [...new Set(itemIds)]
   if (uniqueIds.length === 0) return new Map()
 
+  const supabase = createServiceClient()
   const result = new Map<number, CatalogEntry>()
 
   const { data: cached } = await supabase
