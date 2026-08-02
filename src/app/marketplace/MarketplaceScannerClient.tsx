@@ -87,6 +87,12 @@ interface CraftRow extends OpportunityRow {
   ingredients: CraftIngredient[]
 }
 
+interface VendorRow extends OpportunityRow {
+  vendorPrice: number
+  marketPrice: number
+  velocity: number
+}
+
 interface ScanResponse {
   world: string
   dataCenter: string
@@ -99,11 +105,13 @@ interface ScanResponse {
   taxRates: Record<string, number>
   shortlistSize: number
   recipesAvailable: boolean
+  vendorDataAvailable: boolean
   bestSellers: LeaderboardRow[]
   mostValuable: LeaderboardRow[]
   supplyGaps: SupplyGapRow[]
   arbitrage: ArbitrageRow[]
   craftingProfits: CraftRow[]
+  vendorFlips: VendorRow[]
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +121,24 @@ interface ScanResponse {
 const POLL_INTERVAL_MS = 8000
 const MAX_POLL_ATTEMPTS = 20
 const DEFAULT_TAX_RATE = 0.05
+/** Mirrors LOW_CONFIDENCE_SCORE in opportunities.ts. */
+const LOW_CONFIDENCE_SCORE = 0.4
+
+/**
+ * Rows are re-ranked client-side whenever the tax selector changes, so the
+ * server's rank is stale the moment the rate differs. Renumbering after the
+ * sort keeps the displayed order and the displayed number in agreement.
+ */
+function renumber<T>(rows: T[]): (T & { rank: number })[] {
+  return rows.map((r, i) => ({ ...r, rank: i + 1 }))
+}
+
+/** Dim rows whose evidence is weak, rather than presenting them as equal. */
+function rowClass(confidence: Confidence): string {
+  return confidence.score < LOW_CONFIDENCE_SCORE
+    ? "border-b border-border/50 opacity-60"
+    : "border-b border-border/50"
+}
 
 /** Plain-language copy for each machine-readable penalty code. */
 const PENALTY_LABELS: Record<string, { short: string; detail: string }> = {
@@ -310,6 +336,7 @@ function ArbitrageTable({ rows, taxRate }: { rows: ArbitrageRow[]; taxRate: numb
         }),
     [rows, taxRate]
   )
+  const ranked = useMemo(() => renumber(priced), [priced])
 
   if (priced.length === 0) {
     return <EmptyState>No profitable cross-world buys found for this world right now.</EmptyState>
@@ -330,8 +357,8 @@ function ArbitrageTable({ rows, taxRate }: { rows: ArbitrageRow[]; taxRate: numb
           </tr>
         </thead>
         <tbody>
-          {priced.map((row) => (
-            <tr key={`${row.itemId}-${row.quality}`} className="border-b border-border/50">
+          {ranked.map((row) => (
+            <tr key={`${row.itemId}-${row.quality}`} className={rowClass(row.confidence)}>
               <td className="py-2 pr-2 text-muted-foreground align-top">{row.rank}</td>
               <td className="py-2 pr-2">
                 <ItemCell row={row} />
@@ -378,9 +405,11 @@ function CraftTable({
             return r.jobLevel == null || r.jobLevel <= level
           })
         : rows
-    return filtered
-      .map((r) => ({ ...r, net: r.grossRevenue * (1 - taxRate) - r.cost }))
-      .sort((a, b) => (b.net !== a.net ? b.net - a.net : a.recipeId - b.recipeId))
+    return renumber(
+      filtered
+        .map((r) => ({ ...r, net: r.grossRevenue * (1 - taxRate) - r.cost }))
+        .sort((a, b) => (b.net !== a.net ? b.net - a.net : a.recipeId - b.recipeId))
+    )
   }, [rows, taxRate, crafterLevels, onlyMine])
 
   if (priced.length === 0) {
@@ -410,7 +439,7 @@ function CraftTable({
         </thead>
         <tbody>
           {priced.map((row) => (
-            <tr key={`${row.recipeId}-${row.quality}`} className="border-b border-border/50">
+            <tr key={`${row.recipeId}-${row.quality}`} className={rowClass(row.confidence)}>
               <td className="py-2 pr-2 text-muted-foreground align-top">{row.rank}</td>
               <td className="py-2 pr-2">
                 <ItemCell row={row} />
@@ -439,6 +468,60 @@ function CraftTable({
               </td>
               <td className="py-2 pr-2 text-right align-top font-medium">{gil(row.net)}</td>
               <td className="py-2 pr-2 text-right align-top">{rate(row.velocity)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function VendorTable({ rows, taxRate }: { rows: VendorRow[]; taxRate: number }) {
+  const priced = useMemo(
+    () =>
+      renumber(
+        [...rows]
+          .map((r) => ({ ...r, net: r.grossRevenue * (1 - taxRate) - r.cost }))
+          .sort((a, b) =>
+            b.net !== a.net ? b.net - a.net : b.velocity - a.velocity || a.itemId - b.itemId
+          )
+      ),
+    [rows, taxRate]
+  )
+
+  if (priced.length === 0) {
+    return <EmptyState>No profitable vendor flips found on this world right now.</EmptyState>
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-muted-foreground border-b border-border">
+            <th className="py-2 pr-2 font-medium w-8">#</th>
+            <th className="py-2 pr-2 font-medium">Item</th>
+            <th className="py-2 pr-2 font-medium text-right">Vendor price</th>
+            <th className="py-2 pr-2 font-medium text-right">Sells for</th>
+            <th className="py-2 pr-2 font-medium text-right">Net / unit</th>
+            <th className="py-2 pr-2 font-medium text-right">Sales/day</th>
+            <th className="py-2 pr-2 font-medium text-right">Net / day</th>
+          </tr>
+        </thead>
+        <tbody>
+          {priced.map((row) => (
+            <tr key={row.itemId} className={rowClass(row.confidence)}>
+              <td className="py-2 pr-2 text-muted-foreground align-top">{row.rank}</td>
+              <td className="py-2 pr-2">
+                <ItemCell row={row} />
+                <ConfidenceChips confidence={row.confidence} />
+              </td>
+              <td className="py-2 pr-2 text-right align-top">{gil(row.vendorPrice)}</td>
+              <td className="py-2 pr-2 text-right align-top">{gil(row.marketPrice)}</td>
+              <td className="py-2 pr-2 text-right align-top font-medium">{gil(row.net)}</td>
+              <td className="py-2 pr-2 text-right align-top">{rate(row.velocity)}</td>
+              {/* Vendor stock is unlimited, so throughput is what actually scales
+                  the return — a 100k margin at 0.3 sales/day is a slow trickle. */}
+              <td className="py-2 pr-2 text-right align-top">{gil(row.net * row.velocity)}</td>
             </tr>
           ))}
         </tbody>
@@ -668,6 +751,11 @@ export function MarketplaceScannerClient({
             {view.scannedAt && <span>Scanned {new Date(view.scannedAt).toLocaleString()}</span>}
             {view.status === "refreshing" && <Badge variant="secondary">Updating prices…</Badge>}
             {view.shortlistSize > 0 && <span>· {view.shortlistSize} items checked for supply</span>}
+            {taxCity && taxRate !== DEFAULT_TAX_RATE && (
+              <span title="Rows were selected server-side at 5% tax and re-sorted here at your chosen rate. A different rate can reorder what you see, but cannot pull in a row that missed the original cut.">
+                · re-sorted for {taxCity}
+              </span>
+            )}
           </div>
 
           <Tabs defaultValue="supply-gaps">
@@ -675,6 +763,7 @@ export function MarketplaceScannerClient({
               <TabsTrigger value="supply-gaps">Supply Gaps</TabsTrigger>
               <TabsTrigger value="arbitrage">Arbitrage</TabsTrigger>
               <TabsTrigger value="crafting">Crafting</TabsTrigger>
+              <TabsTrigger value="vendor">Vendor Flips</TabsTrigger>
               <TabsTrigger value="best-sellers">Best Sellers</TabsTrigger>
               <TabsTrigger value="most-valuable">Most Valuable</TabsTrigger>
             </TabsList>
@@ -749,6 +838,26 @@ export function MarketplaceScannerClient({
                     crafterLevels={crafterLevels}
                     onlyMine={onlyMyCrafts}
                   />
+                </>
+              )}
+            </TabsContent>
+
+            <TabsContent value="vendor">
+              {showSkeleton ? (
+                <Skeleton />
+              ) : !view.vendorDataAvailable ? (
+                <EmptyState>
+                  Vendor data hasn&apos;t been loaded yet, so NPC shop prices can&apos;t be
+                  compared. The other tabs are unaffected.
+                </EmptyState>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground mb-2 flex items-start gap-1.5">
+                    <Info className="size-3.5 mt-0.5 shrink-0" />
+                    Items an NPC sells at a fixed price for less than they fetch on the board.
+                    Stock is unlimited, so net-per-day matters more than the margin on one unit.
+                  </p>
+                  <VendorTable rows={view.vendorFlips} taxRate={taxRate} />
                 </>
               )}
             </TabsContent>

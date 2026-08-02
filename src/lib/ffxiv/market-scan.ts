@@ -15,17 +15,20 @@ import {
   buildCraft,
   buildShortlist,
   buildSupplyGap,
+  buildVendor,
   candidateKey,
   ingredientUnitPrice,
   rankArbitrage,
   rankCrafts,
   rankSupplyGaps,
+  rankVendor,
   regionMinListingOf,
   velocityOf,
   type ArbitrageOpportunity,
   type Candidate,
   type CraftOpportunity,
   type SupplyGapOpportunity,
+  type VendorOpportunity,
 } from "./opportunities"
 import { loadRecipeCache, type CachedRecipe } from "./recipes"
 import { createServiceClient } from "@/lib/supabase/service"
@@ -97,8 +100,11 @@ export interface ScanResult {
   supplyGaps: SupplyGapOpportunity[]
   arbitrage: ArbitrageOpportunity[]
   craftingProfits: CraftOpportunity[]
+  vendorFlips: VendorOpportunity[]
   /** False when recipe_cache is empty — the Crafting tab degrades, others don't. */
   recipesAvailable: boolean
+  /** False until a warm has marked vendor items — same degradation rule. */
+  vendorDataAvailable: boolean
   taxRates: TaxRates
   shortlistSize: number
   itemsScanned: number
@@ -107,10 +113,12 @@ export interface ScanResult {
   minVelocityThreshold: number
 }
 
-/** Static Item flags needed by the craft rules, keyed by item id. */
+/** Static Item flags needed by the craft and vendor rules, keyed by item id. */
 interface ItemFlags {
   canBeHq: boolean | null
   isUntradable: boolean | null
+  soldByVendor: boolean | null
+  vendorPrice: number | null
 }
 
 async function loadItemFlags(itemIds: number[]): Promise<Map<number, ItemFlags>> {
@@ -122,7 +130,7 @@ async function loadItemFlags(itemIds: number[]): Promise<Map<number, ItemFlags>>
   for (let i = 0; i < itemIds.length; i += PAGE) {
     const { data, error } = await supabase
       .from("item_catalog")
-      .select("item_id, can_be_hq, is_untradable")
+      .select("item_id, can_be_hq, is_untradable, sold_by_vendor, vendor_price")
       .in("item_id", itemIds.slice(i, i + PAGE))
 
     if (error) {
@@ -130,10 +138,40 @@ async function loadItemFlags(itemIds: number[]): Promise<Map<number, ItemFlags>>
       break
     }
     for (const r of data ?? []) {
-      flags.set(r.item_id, { canBeHq: r.can_be_hq, isUntradable: r.is_untradable })
+      flags.set(r.item_id, {
+        canBeHq: r.can_be_hq,
+        isUntradable: r.is_untradable,
+        soldByVendor: r.sold_by_vendor,
+        vendorPrice: r.vendor_price,
+      })
     }
   }
   return flags
+}
+
+/** Every item the catalogue knows an NPC vendor sells. */
+async function loadVendorItemIds(): Promise<number[]> {
+  const supabase = createServiceClient()
+  const out: number[] = []
+  const PAGE = 1000
+
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("item_catalog")
+      .select("item_id")
+      .eq("sold_by_vendor", true)
+      .order("item_id", { ascending: true })
+      .range(from, from + PAGE - 1)
+
+    if (error) {
+      console.error("[market-scan] vendor item load failed:", error.message)
+      break
+    }
+    if (!data || data.length === 0) break
+    out.push(...data.map((r) => r.item_id))
+    if (data.length < PAGE) break
+  }
+  return out
 }
 
 /**
@@ -149,44 +187,66 @@ function resolveSubCraftCosts(
   aggByItemId: Map<number, UniversalisAggregatedItem>,
   maxDepth = 2
 ): Map<number, number> {
-  const byResult = new Map<number, CachedRecipe>()
+  // An item can have several recipes. Which is cheapest depends on live
+  // material prices, so all of them are evaluated and the lowest computed cost
+  // wins — picking by ingredient count was a proxy that has no relationship to
+  // actual cost, and routinely chose a two-ingredient recipe made of expensive
+  // materials over a four-ingredient one made of cheap ones.
+  const byResult = new Map<number, CachedRecipe[]>()
   for (const r of recipes) {
-    // Cheapest-yielding recipe wins when an item has several.
-    const existing = byResult.get(r.resultItemId)
-    if (!existing || r.ingredients.length < existing.ingredients.length) {
-      byResult.set(r.resultItemId, r)
-    }
+    const list = byResult.get(r.resultItemId)
+    if (list) list.push(r)
+    else byResult.set(r.resultItemId, [r])
   }
 
   const memo = new Map<number, number>()
+  const inProgress = new Set<number>()
   let truncated = 0
 
   const costOf = (itemId: number, depth: number): number | null => {
     if (memo.has(itemId)) return memo.get(itemId) as number
+    // Recipe graphs can contain cycles (A converts to B, B converts back).
+    // Without this the recursion would not terminate on those pairs.
+    if (inProgress.has(itemId)) return null
 
-    const recipe = byResult.get(itemId)
-    if (!recipe) return null
+    const candidates = byResult.get(itemId)
+    if (!candidates || candidates.length === 0) return null
     if (depth >= maxDepth) {
       truncated++
       return null
     }
 
-    let total = 0
-    for (const ing of recipe.ingredients) {
-      const bought = ingredientUnitPrice(aggByItemId.get(ing.itemId))
-      const deeper = costOf(ing.itemId, depth + 1)
-      const unit =
-        deeper != null && (bought == null || deeper < bought.price) ? deeper : bought?.price ?? null
-      if (unit == null) return null
-      total += unit * ing.qty
+    inProgress.add(itemId)
+    let best: number | null = null
+
+    for (const recipe of candidates) {
+      let total = 0
+      let viable = true
+      for (const ing of recipe.ingredients) {
+        const bought = ingredientUnitPrice(aggByItemId.get(ing.itemId))
+        const deeper = costOf(ing.itemId, depth + 1)
+        const unit =
+          deeper != null && (bought == null || deeper < bought.price)
+            ? deeper
+            : bought?.price ?? null
+        if (unit == null) {
+          viable = false
+          break
+        }
+        total += unit * ing.qty
+      }
+      if (!viable) continue
+
+      const perUnit = total / Math.max(1, recipe.resultQty)
+      if (best == null || perUnit < best) best = perUnit
     }
 
-    const perUnit = total / Math.max(1, recipe.resultQty)
-    memo.set(itemId, perUnit)
-    return perUnit
+    inProgress.delete(itemId)
+    if (best != null) memo.set(itemId, best)
+    return best
   }
 
-  for (const r of recipes) costOf(r.resultItemId, 0)
+  for (const itemId of byResult.keys()) costOf(itemId, 0)
 
   if (truncated > 0) {
     console.info(`[market-scan] sub-craft depth cap hit ${truncated} times (max depth ${maxDepth})`)
@@ -230,7 +290,9 @@ export async function scanWorld(world: string, opts?: { minVelocity?: number }):
   ])
 
   const stats = items.map(computeItemStat)
-  const failedSet = new Set(failedItemIds)
+  // `failedItemIds` is reported at scan level only (itemsFailed). It is
+  // intentionally not used per-row: a stage-1 failure means the item never
+  // enters `items`, so no opportunity can be built from it to flag.
   const byItemId = new Map(items.map((i) => [i.itemId, i]))
   const now = Date.now()
 
@@ -253,7 +315,11 @@ export async function scanWorld(world: string, opts?: { minVelocity?: number }):
           quality,
           homeWorldId,
           sameDcWorldIds,
-          partialBatch: failedSet.has(agg.itemId),
+          // Unreachable by construction: `items` only contains successes, so a
+          // stage-1 failure can never appear here. Only the supply-gap engine
+          // has a real per-row partiality signal (a stage-2 supply failure,
+          // which leaves the stage-1 row intact).
+          partialBatch: false,
           now,
         })
         if (row) arbitrageRows.push(row)
@@ -283,10 +349,40 @@ export async function scanWorld(world: string, opts?: { minVelocity?: number }):
       agg,
       supply,
       quality: c.quality,
-      partialBatch: failedSet.has(c.itemId) || supplyFailedSet.has(c.itemId),
+      // Reachable here: a stage-2 supply failure leaves the stage-1 aggregate
+      // in place, so the row is built from incomplete data rather than dropped.
+      partialBatch: supplyFailedSet.has(c.itemId),
       now,
     })
     if (row) supplyGapRows.push(row)
+  }
+
+  // --- Vendor arbitrage -----------------------------------------------------
+  // Gated on the explicit sold_by_vendor flag from GilShopItem, never on a
+  // non-null PriceMid: that field is set on thousands of items no NPC stocks.
+  const vendorItemIds = await loadVendorItemIds()
+  const vendorRows: VendorOpportunity[] = []
+
+  if (vendorItemIds.length > 0) {
+    const vendorFlags = await loadItemFlags(vendorItemIds)
+    for (const itemId of vendorItemIds) {
+      const agg = byItemId.get(itemId)
+      if (!agg) continue
+      const f = vendorFlags.get(itemId)
+      const row = buildVendor({
+        agg,
+        soldByVendor: f?.soldByVendor ?? null,
+        isUntradable: f?.isUntradable ?? null,
+        vendorPrice: f?.vendorPrice ?? null,
+        homeWorldId,
+        // A stage-1 failure removes the item entirely, so it can never reach
+        // here — this engine has no per-row partiality signal. Scan-level
+        // `itemsFailed` covers it instead.
+        partialBatch: false,
+        now,
+      })
+      if (row) vendorRows.push(row)
+    }
   }
 
   // --- Crafting -------------------------------------------------------------
@@ -321,7 +417,10 @@ export async function scanWorld(world: string, opts?: { minVelocity?: number }):
           canBeHq,
           isUntradable,
           subCraftCost,
-          partialBatch: failedSet.has(recipe.resultItemId),
+          homeWorldId,
+          // As with vendor rows: a stage-1 failure drops the item before it can
+          // reach here, so there is no reachable per-row signal.
+          partialBatch: false,
           now,
         })
 
@@ -345,7 +444,9 @@ export async function scanWorld(world: string, opts?: { minVelocity?: number }):
     supplyGaps: rankSupplyGaps(supplyGapRows),
     arbitrage: rankArbitrage(arbitrageRows),
     craftingProfits: rankCrafts(craftRows),
+    vendorFlips: rankVendor(vendorRows),
     recipesAvailable: recipes.length > 0,
+    vendorDataAvailable: vendorItemIds.length > 0,
     taxRates,
     shortlistSize: shortlist.length,
     itemsScanned: items.length,

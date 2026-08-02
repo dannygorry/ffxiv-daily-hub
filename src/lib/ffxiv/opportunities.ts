@@ -496,6 +496,103 @@ export function buildArbitrage(input: ArbitrageInput): ArbitrageOpportunity | nu
 }
 
 // ---------------------------------------------------------------------------
+// Vendor arbitrage (Phase 3)
+// ---------------------------------------------------------------------------
+
+export interface VendorOpportunity extends Opportunity {
+  kind: "vendor"
+  vendorPrice: number
+  marketPrice: number
+  velocity: number
+}
+
+export interface VendorInput {
+  agg: UniversalisAggregatedItem
+  /** Must be an explicit true — see the note on the `sold_by_vendor` column. */
+  soldByVendor: boolean | null
+  isUntradable: boolean | null
+  vendorPrice: number | null
+  /** Home world id, so freshness reads that world's upload time specifically. */
+  homeWorldId: number | null
+  partialBatch: boolean
+  now: number
+}
+
+/**
+ * Buy from an NPC at a fixed price, resell on the market board.
+ *
+ * The engine is deliberately gated on an explicit `soldByVendor === true`
+ * rather than on a non-null vendor price. `Item.PriceMid` is populated on
+ * thousands of items no vendor stocks, so trusting it would fabricate the
+ * majority of this tab.
+ *
+ * Vendor stock is unlimited and its price never moves, so the usual buy-side
+ * risks don't apply — but the market side is the same poisoned-average problem
+ * as everywhere else, and gets the same guards.
+ */
+export function buildVendor(input: VendorInput): VendorOpportunity | null {
+  const { agg, soldByVendor, isUntradable, vendorPrice, homeWorldId, partialBatch, now } = input
+
+  if (soldByVendor !== true) return null
+  // Restrictive on unknown, same as the craft rules.
+  if (isUntradable !== false) return null
+  if (vendorPrice == null || vendorPrice <= 0) return null
+
+  // Vendor items are bought and resold NQ; an NPC does not sell HQ.
+  const marketPrice = avgPriceOf(agg, "nq")
+  const velocity = velocityOf(agg, "nq")
+  if (marketPrice == null || marketPrice <= 0 || velocity <= 0) return null
+
+  if (
+    isPoisonedAverage(marketPrice, referenceListingOf(agg, "nq"), regionListingPriceOf(agg, "nq"))
+  ) {
+    return null
+  }
+
+  const net = marketPrice * (1 - DEFAULT_TAX_RATE) - vendorPrice
+  if (net <= 0) return null
+
+  const penalties: PenaltyCode[] = []
+  if (isLowSaleCount(velocity)) penalties.push("low_sale_count")
+  if (partialBatch) penalties.push("partial_batch")
+
+  // Home world's own upload time, not whichever world the API listed first.
+  const upload = homeWorldId != null ? uploadTimeForWorld(agg, homeWorldId) : null
+  const tier = upload == null ? "aging" : tierForAge(now - upload)
+  if (tier === "excluded") return null
+
+  return {
+    kind: "vendor",
+    itemId: agg.itemId,
+    quality: "nq",
+    confidence: buildConfidence(tier, penalties),
+    vendorPrice,
+    marketPrice,
+    velocity,
+    grossRevenue: marketPrice,
+    cost: vendorPrice,
+    taxRateUsed: DEFAULT_TAX_RATE,
+  }
+}
+
+export function rankVendor(
+  rows: VendorOpportunity[],
+  limit = OPPORTUNITY_LIMIT
+): VendorOpportunity[] {
+  const net = (r: VendorOpportunity) => r.grossRevenue * (1 - r.taxRateUsed) - r.cost
+  return [...rows]
+    .sort((a, b) => {
+      const d = net(b) - net(a)
+      if (d !== 0) return d
+      // Prefer the faster mover when profit ties: vendor stock is unlimited, so
+      // throughput is the only thing that scales the return.
+      if (b.velocity !== a.velocity) return b.velocity - a.velocity
+      return a.itemId - b.itemId
+    })
+    .slice(0, limit)
+}
+
+// ---------------------------------------------------------------------------
 // Crafting (Phase 2)
 // ---------------------------------------------------------------------------
 
@@ -568,6 +665,8 @@ export interface CraftInput {
   isUntradable: (itemId: number) => boolean | null
   /** Cheaper craft cost for an ingredient, when sub-craft resolution found one. */
   subCraftCost?: (itemId: number) => number | null
+  /** Home world id, so freshness reads that world's upload time specifically. */
+  homeWorldId: number | null
   partialBatch: boolean
   now: number
 }
@@ -588,7 +687,8 @@ export interface CraftInput {
 export function buildCraft(input: CraftInput): CraftOpportunity | { skipped: CraftSkipReason } {
   const {
     recipeId, resultItemId, resultQty, craftType, jobLevel, ingredients,
-    quality, aggByItemId, canBeHq, isUntradable, subCraftCost, partialBatch, now,
+    quality, aggByItemId, canBeHq, isUntradable, subCraftCost, homeWorldId,
+    partialBatch, now,
   } = input
 
   // Unknown metadata is restrictive, not permissive: no HQ row unless the item
@@ -615,7 +715,10 @@ export function buildCraft(input: CraftInput): CraftOpportunity | { skipped: Cra
   const costs: CraftIngredientCost[] = []
   let totalCost = 0
   for (const ing of ingredients) {
-    if (isUntradable(ing.itemId) === true) return { skipped: "untradable_ingredient" }
+    // Unknown metadata is restrictive, matching the HQ rule above. Accepting
+    // null as "tradeable" would let an unwarmed or partially-resolved catalogue
+    // price recipes around materials that cannot actually be bought.
+    if (isUntradable(ing.itemId) !== false) return { skipped: "untradable_ingredient" }
 
     const bought = ingredientUnitPrice(aggByItemId.get(ing.itemId))
     const crafted = subCraftCost?.(ing.itemId) ?? null
@@ -647,10 +750,15 @@ export function buildCraft(input: CraftInput): CraftOpportunity | { skipped: Cra
   if (isLowSaleCount(velocity)) penalties.push("low_sale_count")
   if (partialBatch) penalties.push("partial_batch")
 
-  // Crafting has no supply snapshot of its own; freshness rides the result
-  // item's aggregated upload times, which is the best signal available.
-  const upload = resultAgg?.worldUploadTimes?.[0]?.timestamp ?? null
-  const tier = upload == null ? "fresh" : tierForAge(now - upload)
+  // Crafting has no supply snapshot of its own, so freshness rides the result
+  // item's upload time — for THIS world specifically. `worldUploadTimes[0]` is
+  // whichever world the API happened to list first, so it could report a
+  // neighbour's freshness and mark stale local data as fresh.
+  const upload =
+    resultAgg && homeWorldId != null ? uploadTimeForWorld(resultAgg, homeWorldId) : null
+  // Unknown freshness is not assumed fresh: it downgrades to `aging`, the same
+  // treatment arbitrage gives a buy world with no upload record.
+  const tier = upload == null ? "aging" : tierForAge(now - upload)
   if (tier === "excluded") return { skipped: "no_recipe_result_price" }
 
   return {
@@ -701,17 +809,21 @@ export function rankCrafts(
   const perJob = opts.perJob ?? CRAFT_PER_JOB_LIMIT
 
   const sorted = [...rows].sort(byNetDesc)
-  const picked = new Map<number, CraftOpportunity>()
+  // Keyed by recipe AND quality. A recipe emits an NQ row and an HQ row, so
+  // keying on recipeId alone lets the lower-ranked quality overwrite the higher
+  // one already picked, and silently shrinks the retained set below the limits.
+  const key = (c: CraftOpportunity) => `${c.recipeId}:${c.quality}`
+  const picked = new Map<string, CraftOpportunity>()
 
-  for (const c of sorted.slice(0, overall)) picked.set(c.recipeId, c)
+  for (const c of sorted.slice(0, overall)) picked.set(key(c), c)
 
   const perType = new Map<string, number>()
   for (const c of sorted) {
-    const key = c.craftType ?? "Unknown"
-    const seen = perType.get(key) ?? 0
+    const type = c.craftType ?? "Unknown"
+    const seen = perType.get(type) ?? 0
     if (seen >= perJob) continue
-    perType.set(key, seen + 1)
-    picked.set(c.recipeId, c)
+    perType.set(type, seen + 1)
+    picked.set(key(c), c)
   }
 
   return [...picked.values()].sort(byNetDesc)

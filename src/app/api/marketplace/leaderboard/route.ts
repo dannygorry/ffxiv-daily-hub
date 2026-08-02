@@ -9,6 +9,7 @@ import type {
   ArbitrageOpportunity,
   CraftOpportunity,
   SupplyGapOpportunity,
+  VendorOpportunity,
 } from "@/lib/ffxiv/opportunities"
 import type { TaxRates } from "@/lib/ffxiv/universalis"
 import { fetchWorldTopology } from "@/lib/ffxiv/universalis"
@@ -24,6 +25,22 @@ export const maxDuration = 300
 const CACHE_TTL_MS = 3 * 60 * 60 * 1000
 // Must match the defaults in acquire_marketplace_lease (migration 015).
 const MANUAL_COOLDOWN_MS = 15 * 60 * 1000
+const LEASE_TTL_MS = 10 * 60 * 1000
+
+/**
+ * Whether a lease is genuinely held right now.
+ *
+ * Checking `refresh_started_at != null` alone is not enough: if a scan dies
+ * without running its terminal write — process killed, serverless timeout — the
+ * column stays set forever. The acquire SQL already treats such a lease as
+ * expired and would happily take it, but a reader that reports "a scan is
+ * running" purely because the column is non-null never gets as far as trying,
+ * so the world is stranded in `initializing`/`refreshing` permanently.
+ */
+function isLeaseLive(startedAt: string | null): boolean {
+  if (!startedAt) return false
+  return Date.now() - new Date(startedAt).getTime() < LEASE_TTL_MS
+}
 
 function dataCenterOf(world: string): string {
   for (const [dc, worlds] of Object.entries(DATA_CENTERS)) {
@@ -38,11 +55,34 @@ interface VersionedPayload<T> {
   items: T[]
 }
 
+const PAYLOAD_VERSION = 1
+
 function readPayload<T>(raw: unknown): T[] {
   if (!raw || typeof raw !== "object") return []
   const p = raw as Partial<VersionedPayload<T>>
-  if (p.v !== 1 || !Array.isArray(p.items)) return []
+  if (p.v !== PAYLOAD_VERSION || !Array.isArray(p.items)) return []
   return p.items
+}
+
+/**
+ * True when any cached payload was written under a different schema version.
+ *
+ * `readPayload` already refuses to interpret those, but silently returning an
+ * empty array would render as "we looked and found nothing" until the TTL
+ * happened to lapse. Detecting it here makes a version bump behave like
+ * expiry: the row is rebuilt on the next request.
+ */
+function hasStalePayload(row: ScanRow): boolean {
+  const versionOf = (raw: unknown): number | null => {
+    if (!raw || typeof raw !== "object") return null
+    const v = (raw as { v?: unknown }).v
+    return typeof v === "number" ? v : null
+  }
+  // Columns added by later migrations default to the current version, so a
+  // missing/older value only ever means a genuine schema change.
+  return [row.supply_gaps, row.arbitrage, row.crafting_profits, row.vendor_flips].some(
+    (p) => versionOf(p) !== PAYLOAD_VERSION
+  )
 }
 
 function wrap<T>(items: T[]): VersionedPayload<T> {
@@ -60,6 +100,7 @@ type ScanRow = {
   supply_gaps: unknown
   arbitrage: unknown
   crafting_profits: unknown
+  vendor_flips: unknown
   tax_rates: TaxRates | null
   shortlist_size: number | null
   refresh_started_at: string | null
@@ -69,7 +110,7 @@ type ScanRow = {
 
 const SCAN_COLUMNS =
   "world, data_center, scanned_at, scan_completed_at, min_velocity_threshold, " +
-  "best_sellers, most_valuable, supply_gaps, arbitrage, crafting_profits, " +
+  "best_sellers, most_valuable, supply_gaps, arbitrage, crafting_profits, vendor_flips, " +
   "tax_rates, shortlist_size, refresh_started_at, refresh_error, last_manual_refresh_at"
 
 // ---------------------------------------------------------------------------
@@ -151,6 +192,8 @@ async function writeSuccess(
       shortlist_size: result.shortlistSize,
       // crafting (migration 016)
       crafting_profits: wrap(result.craftingProfits),
+      // vendor arbitrage (migration 017)
+      vendor_flips: wrap(result.vendorFlips),
       // state
       scan_completed_at: nowIso,
       refresh_error: null,
@@ -240,7 +283,11 @@ interface ResponseOpts {
   refreshing?: boolean
 }
 
-async function shapeResponse(row: ScanRow, opts: ResponseOpts = {}) {
+async function shapeResponse(
+  supabase: ServiceClient,
+  row: ScanRow,
+  opts: ResponseOpts = {}
+) {
   const completed = row.scan_completed_at
   const hasError = Boolean(row.refresh_error)
 
@@ -260,16 +307,19 @@ async function shapeResponse(row: ScanRow, opts: ResponseOpts = {}) {
   const supplyGaps = readPayload<SupplyGapOpportunity>(row.supply_gaps)
   const arbitrage = readPayload<ArbitrageOpportunity>(row.arbitrage)
   const crafting = readPayload<CraftOpportunity>(row.crafting_profits)
+  const vendor = readPayload<VendorOpportunity>(row.vendor_flips)
 
   // `failed` has no usable payload by definition — don't ship empty arrays that
   // could read as "we looked and found nothing".
   const payloadless = status === "failed"
   const lookup = payloadless
     ? () => ({ name: "", iconUrl: null })
-    : await buildNameLookup(bestSellers, mostValuable, supplyGaps, arbitrage, crafting)
+    : await buildNameLookup(bestSellers, mostValuable, supplyGaps, arbitrage, crafting, vendor)
 
   // Arbitrage rows carry a numeric buyWorldId from the aggregated payload;
   // resolve it here so the client never needs the topology.
+  const availability = await resolveAvailability(supabase, crafting.length, vendor.length)
+
   let worldName: (id: number) => string = (id) => `World ${id}`
   if (!payloadless && arbitrage.length > 0) {
     try {
@@ -301,10 +351,40 @@ async function shapeResponse(row: ScanRow, opts: ResponseOpts = {}) {
       ? []
       : withRank(arbitrage, lookup).map((r) => ({ ...r, buyWorldName: worldName(r.buyWorldId) })),
     craftingProfits: payloadless ? [] : withRank(crafting, lookup),
-    // An empty payload here means the recipe cache has never been warmed, which
-    // is a different thing from "no profitable crafts" and reads differently.
-    recipesAvailable: crafting.length > 0,
+    vendorFlips: payloadless ? [] : withRank(vendor, lookup),
+    ...availability,
   })
+}
+
+/**
+ * Distinguishes "the static data was never warmed" from "it was warmed and
+ * nothing was profitable".
+ *
+ * Deriving this from the result count conflates the two, and tells a user to go
+ * load data that is already loaded. The counts are only queried when a payload
+ * is actually empty, so the common path costs nothing.
+ */
+async function resolveAvailability(
+  supabase: ServiceClient,
+  craftingCount: number,
+  vendorCount: number
+): Promise<{ recipesAvailable: boolean; vendorDataAvailable: boolean }> {
+  const recipesAvailable =
+    craftingCount > 0 ||
+    ((
+      await supabase.from("recipe_cache").select("recipe_id", { count: "exact", head: true })
+    ).count ?? 0) > 0
+
+  const vendorDataAvailable =
+    vendorCount > 0 ||
+    ((
+      await supabase
+        .from("item_catalog")
+        .select("item_id", { count: "exact", head: true })
+        .eq("sold_by_vendor", true)
+    ).count ?? 0) > 0
+
+  return { recipesAvailable, vendorDataAvailable }
 }
 
 async function readRow(supabase: ServiceClient, world: string): Promise<ScanRow | null> {
@@ -361,11 +441,12 @@ export async function GET(req: NextRequest) {
   // Cold world: nothing cached at all. Take the lease and scan inline — there
   // is nothing to serve in the meantime.
   if (!row || !row.scan_completed_at) {
-    const leaseHeld = Boolean(row?.refresh_started_at)
-    if (leaseHeld) {
+    // Only a *live* lease means someone is actually scanning. An expired one is
+    // a dead scan, and falling through lets this request take it over.
+    if (row && isLeaseLive(row.refresh_started_at)) {
       // Another request is already scanning. Report initializing and let the
       // client poll rather than starting a second two-minute scan.
-      return shapeResponse(row as ScanRow)
+      return shapeResponse(supabase, row)
     }
 
     const token = await acquireLease(supabase, world, false)
@@ -373,21 +454,24 @@ export async function GET(req: NextRequest) {
       // Lost the race between the read and the acquire.
       const fresh = await readRow(supabase, world)
       return fresh
-        ? shapeResponse(fresh)
+        ? shapeResponse(supabase, fresh)
         : NextResponse.json({ error: "Could not start a scan" }, { status: 503 })
     }
 
     await runScanUnderLease(supabase, world, token)
     const after_ = await readRow(supabase, world)
     return after_
-      ? shapeResponse(after_)
+      ? shapeResponse(supabase, after_)
       : NextResponse.json({ error: "Scan produced no row" }, { status: 500 })
   }
 
   // Warm cache. Serve immediately; refresh in the background if the TTL lapsed.
   const completedAt = new Date(row.scan_completed_at).getTime()
-  const stale = Date.now() - completedAt > CACHE_TTL_MS
-  let refreshing = Boolean(row.refresh_started_at)
+  // A payload written under an older schema is unreadable, so the cached row is
+  // effectively empty even though its timestamp looks current — treat it as
+  // stale so the next request rebuilds it instead of serving blank tabs.
+  const stale = Date.now() - completedAt > CACHE_TTL_MS || hasStalePayload(row)
+  let refreshing = isLeaseLive(row.refresh_started_at)
 
   if (stale && !refreshing) {
     const token = await acquireLease(supabase, world, false)
@@ -399,7 +483,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return shapeResponse(row, { refreshing })
+  return shapeResponse(supabase, row, { refreshing })
 }
 
 // ---------------------------------------------------------------------------
@@ -434,7 +518,7 @@ export async function PUT(req: NextRequest) {
 
     // Throttled with no usable cache (the first manual scan failed) must read
     // as `failed`, not `ready` — there is genuinely nothing to show.
-    return shapeResponse(row, {
+    return shapeResponse(supabase, row, {
       throttled: cooldownActive,
       nextRefreshAt,
       refreshing: !cooldownActive && Boolean(row.refresh_started_at),
@@ -444,6 +528,6 @@ export async function PUT(req: NextRequest) {
   await runScanUnderLease(supabase, world, token)
   const row = await readRow(supabase, world)
   return row
-    ? shapeResponse(row)
+    ? shapeResponse(supabase, row)
     : NextResponse.json({ error: "Scan produced no row" }, { status: 500 })
 }

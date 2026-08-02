@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service"
 import { fetchItemMetadata, toCatalogRow } from "./item-catalog"
+import { fetchVendorItemIds } from "./vendors"
 
 const XIVAPI_BASE = "https://v2.xivapi.com/api"
 const PAGE_SIZE = 500
@@ -121,6 +122,7 @@ export async function fetchAllRecipes(): Promise<{ recipes: CachedRecipe[]; game
 export interface WarmResult {
   recipesWritten: number
   itemsWritten: number
+  vendorItems: number
   gameVersion: string | null
   durationMs: number
 }
@@ -159,12 +161,26 @@ export async function warmRecipeCache(): Promise<WarmResult> {
     if (error) throw new Error(`recipe_cache upsert failed: ${error.message}`)
   }
 
-  // Every result and ingredient, so no craft calculation has to resolve an item
-  // mid-scan.
-  const itemIds = [...new Set(recipes.flatMap((r) => [r.resultItemId, ...r.ingredients.map((i) => i.itemId)]))]
+  // Vendor-sold items come from GilShopItem, not from Item.PriceMid — see the
+  // note in migration 017. Fetched here so both static datasets are refreshed
+  // by one explicit operation.
+  const vendorIds = await fetchVendorItemIds()
+  const vendorSet = new Set(vendorIds)
+
+  // Every recipe result and ingredient, plus every vendor item, so neither the
+  // craft nor the vendor engine has to resolve an item mid-scan.
+  const itemIds = [
+    ...new Set([
+      ...recipes.flatMap((r) => [r.resultItemId, ...r.ingredients.map((i) => i.itemId)]),
+      ...vendorIds,
+    ]),
+  ]
   const metadata = await fetchItemMetadata(itemIds)
 
-  const catalogRows = Array.from(metadata.entries()).map(([id, m]) => toCatalogRow(id, m))
+  const catalogRows = Array.from(metadata.entries()).map(([id, m]) => ({
+    ...toCatalogRow(id, m),
+    sold_by_vendor: vendorSet.has(id),
+  }))
   for (let i = 0; i < catalogRows.length; i += 500) {
     const { error } = await supabase
       .from("item_catalog")
@@ -175,6 +191,7 @@ export async function warmRecipeCache(): Promise<WarmResult> {
   return {
     recipesWritten: rows.length,
     itemsWritten: catalogRows.length,
+    vendorItems: vendorIds.length,
     gameVersion,
     durationMs: Date.now() - startedAt,
   }
