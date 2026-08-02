@@ -1,6 +1,7 @@
 import {
   fetchAllAggregatedStats,
   fetchMarketableItemIds,
+  fetchRecentSaleMedians,
   fetchSupplyDetail,
   fetchTaxRates,
   fetchWorldTopology,
@@ -18,6 +19,8 @@ import {
   buildVendor,
   candidateKey,
   ingredientUnitPrice,
+  isMeanFarAboveMedian,
+  quotedSalePrice,
   rankArbitrage,
   rankCrafts,
   rankSupplyGaps,
@@ -438,13 +441,48 @@ export async function scanWorld(world: string, opts?: { minVelocity?: number }):
     )
   }
 
+  // --- Final price sanity pass ----------------------------------------------
+  // Everything above prices off Universalis's 4-day *mean*, which two freak
+  // sales can drag far from reality — and the listing-based guards can't see
+  // that, because they only ever compare one number against another. The median
+  // of recent sales can. Running it over the already-retained rows keeps it to
+  // a single extra request instead of thousands.
+  let supplyGaps = rankSupplyGaps(supplyGapRows)
+  let arbitrage = rankArbitrage(arbitrageRows)
+  let craftingProfits = rankCrafts(craftRows)
+  let vendorFlips = rankVendor(vendorRows)
+
+  const retainedIds = [
+    ...supplyGaps.map((r) => r.itemId),
+    ...arbitrage.map((r) => r.itemId),
+    ...craftingProfits.map((r) => r.itemId),
+    ...vendorFlips.map((r) => r.itemId),
+  ]
+  const medians = await fetchRecentSaleMedians(world, retainedIds)
+
+  const keep = <T extends SupplyGapOpportunity | ArbitrageOpportunity | CraftOpportunity | VendorOpportunity>(
+    rows: T[]
+  ): T[] => rows.filter((r) => !isMeanFarAboveMedian(quotedSalePrice(r), medians.get(r.itemId)))
+
+  const before =
+    supplyGaps.length + arbitrage.length + craftingProfits.length + vendorFlips.length
+  supplyGaps = keep(supplyGaps)
+  arbitrage = keep(arbitrage)
+  craftingProfits = keep(craftingProfits)
+  vendorFlips = keep(vendorFlips)
+  const dropped =
+    before - (supplyGaps.length + arbitrage.length + craftingProfits.length + vendorFlips.length)
+  if (dropped > 0) {
+    console.info(`[market-scan] ${world}: dropped ${dropped} rows whose mean price failed the median check`)
+  }
+
   return {
     bestSellers: rankBestSellers(stats),
     mostValuable: rankMostValuable(stats, { minVelocity }),
-    supplyGaps: rankSupplyGaps(supplyGapRows),
-    arbitrage: rankArbitrage(arbitrageRows),
-    craftingProfits: rankCrafts(craftRows),
-    vendorFlips: rankVendor(vendorRows),
+    supplyGaps,
+    arbitrage,
+    craftingProfits,
+    vendorFlips,
     recipesAvailable: recipes.length > 0,
     vendorDataAvailable: vendorItemIds.length > 0,
     taxRates,

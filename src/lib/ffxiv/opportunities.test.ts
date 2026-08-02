@@ -9,8 +9,10 @@ import {
   buildSupplyGap,
   buildVendor,
   ingredientUnitPrice,
+  isMeanFarAboveMedian,
   isOutlierListing,
   isPoisonedAverage,
+  quotedSalePrice,
   rankArbitrage,
   rankCrafts,
   tierForAge,
@@ -503,6 +505,66 @@ describe("crafting", () => {
     }
     const kept = rankCrafts(rows)
     assert.ok(kept.some((r) => r.craftType === "Cooking"))
+  })
+})
+
+describe("median price check", () => {
+  // Real Gilgamesh rows. The mean-vs-listing guards cannot separate these
+  // because each only compares one number against another.
+  it("rejects a mean dragged up by a couple of outlier sales", () => {
+    // Hannish Bed: sold twice near 200,000 among ten sales around 14,320.
+    assert.equal(isMeanFarAboveMedian(199_998, 14_320), true)
+  })
+
+  it("keeps a genuinely expensive item", () => {
+    // Umbral Clay really does sell for 700k-800k.
+    assert.equal(isMeanFarAboveMedian(752_856, 775_000), false)
+  })
+
+  it("keeps a volatile item whose high sales actually happened", () => {
+    // Ametrine Bracelet: 250,000 x3 among sales ranging 40,000-250,000.
+    assert.equal(isMeanFarAboveMedian(250_000, 125_000), false)
+  })
+
+  it("holds no opinion without a median", () => {
+    assert.equal(isMeanFarAboveMedian(199_998, undefined), false)
+    assert.equal(isMeanFarAboveMedian(199_998, 0), false)
+  })
+
+  it("reads the sale-side price for every engine shape", () => {
+    const base = {
+      itemId: 1,
+      quality: "nq" as Quality,
+      confidence: buildConfidence("fresh", []),
+      grossRevenue: 0,
+      cost: 0,
+      taxRateUsed: 0.05,
+    }
+    assert.equal(
+      quotedSalePrice({
+        ...base, kind: "supply_gap", unitsForSale: 0, listingsCount: 0, velocity: 1,
+        daysOfSupply: null, avgSalePrice: 111, unmetDemandPerDay: 111,
+      }),
+      111
+    )
+    assert.equal(
+      quotedSalePrice({
+        ...base, kind: "arbitrage", buyWorldId: 2, buyPrice: 1, homeSalePrice: 222,
+        velocity: 1, sameDataCenter: false,
+      }),
+      222
+    )
+    assert.equal(
+      quotedSalePrice({
+        ...base, kind: "craft", recipeId: 1, resultQty: 1, craftType: null, jobLevel: null,
+        resultUnitPrice: 333, velocity: 1, ingredients: [],
+      }),
+      333
+    )
+    assert.equal(
+      quotedSalePrice({ ...base, kind: "vendor", vendorPrice: 1, marketPrice: 444, velocity: 1 }),
+      444
+    )
   })
 })
 

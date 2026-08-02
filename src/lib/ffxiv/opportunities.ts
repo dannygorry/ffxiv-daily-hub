@@ -177,6 +177,52 @@ export function isPoisonedAverage(
  */
 export const MAX_ARBITRAGE_MULTIPLE = 50
 
+/**
+ * How far a mean sale price may sit above the median before it is untrustworthy.
+ *
+ * Calibrated against three real Gilgamesh rows: Umbral Clay (mean 752,856 vs
+ * median ~775,000, ratio ~1.0 — genuinely worth 750k), Ametrine Bracelet
+ * (250,000 vs ~125,000, ratio 2 — volatile but those sales happened), and
+ * Hannish Bed (199,998 vs 14,320, ratio 14 — two outliers in twelve sales
+ * masquerading as the going rate). 3x separates the volatile from the false.
+ */
+export const MAX_MEAN_TO_MEDIAN = 3
+
+/**
+ * Final price sanity check for rows about to be shown.
+ *
+ * The listing-based guards compare a mean against another *single* number, so
+ * they cannot tell a genuinely expensive item from one whose mean was dragged
+ * up by a couple of sales. Comparing against the median of recent sales can,
+ * because a median ignores the tails.
+ *
+ * Returns true when the row should be dropped. A missing median means no
+ * opinion — the row is kept rather than rejected on absent evidence.
+ */
+export function isMeanFarAboveMedian(
+  meanPrice: number,
+  median: number | undefined
+): boolean {
+  if (median == null || median <= 0) return false
+  return meanPrice > median * MAX_MEAN_TO_MEDIAN
+}
+
+/** The price each engine's row is effectively quoting as the sale side. */
+export function quotedSalePrice(
+  row: SupplyGapOpportunity | ArbitrageOpportunity | CraftOpportunity | VendorOpportunity
+): number {
+  switch (row.kind) {
+    case "supply_gap":
+      return row.avgSalePrice
+    case "arbitrage":
+      return row.homeSalePrice
+    case "craft":
+      return row.resultUnitPrice
+    case "vendor":
+      return row.marketPrice
+  }
+}
+
 /** Under ~4 sales in the 4-day window; the velocity figure is noise-dominated. */
 export function isLowSaleCount(velocity: number): boolean {
   return velocity > 0 && velocity < 1

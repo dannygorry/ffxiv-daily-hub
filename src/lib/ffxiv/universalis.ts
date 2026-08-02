@@ -246,6 +246,70 @@ export async function fetchSupplyDetail(
 }
 
 // ---------------------------------------------------------------------------
+// Recent-sale medians (outlier-resistant price check)
+// ---------------------------------------------------------------------------
+
+const MEDIAN_ENTRIES = 20
+
+/**
+ * Median unit sale price over the most recent sales, per item.
+ *
+ * Universalis's `averageSalePrice` is a mean, so two freak sales in a twelve-
+ * sale window drag it far from reality. Observed on Gilgamesh: Hannish Bed sold
+ * twice near 200,000 among ten sales around 14,320, and the mean came back as
+ * 199,998 — a ~14x overstatement that clears both the home-listing guard (only
+ * 4x over the listing) and the region backstop (only 14x over region).
+ *
+ * A median is unmoved by a couple of outliers, so it is the cheap sanity check
+ * the mean-based guards cannot provide. Only ever run over a retained top-N,
+ * which is one request per engine rather than thousands.
+ */
+export async function fetchRecentSaleMedians(
+  world: string,
+  itemIds: number[]
+): Promise<Map<number, number>> {
+  const medians = new Map<number, number>()
+  const unique = [...new Set(itemIds)]
+  if (unique.length < 2) return medians
+
+  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
+    const batch = unique.slice(i, i + BATCH_SIZE)
+    if (batch.length < 2) break
+
+    // `listings=0` is safe here: it suppresses listing data we don't want and,
+    // unlike the supply query, nothing we read is derived from listings.
+    const path =
+      `/${encodeURIComponent(world)}/${batch.join(",")}` +
+      `?listings=0&entries=${MEDIAN_ENTRIES}&fields=${encodeURIComponent("items.recentHistory")}`
+
+    try {
+      const res = await universalisFetch(path)
+      if (!res.ok) continue
+      const data: {
+        items?: Record<string, { recentHistory?: { pricePerUnit?: number }[] }>
+      } = await res.json()
+
+      for (const [rawId, item] of Object.entries(data.items ?? {})) {
+        const prices = (item.recentHistory ?? [])
+          .map((h) => h.pricePerUnit)
+          .filter((p): p is number => typeof p === "number" && p > 0)
+          .sort((a, b) => a - b)
+        if (prices.length === 0) continue
+        const mid = Math.floor(prices.length / 2)
+        medians.set(
+          Number(rawId),
+          prices.length % 2 === 0 ? (prices[mid - 1] + prices[mid]) / 2 : prices[mid]
+        )
+      }
+    } catch {
+      // Missing medians simply mean the check is skipped for those rows.
+    }
+  }
+
+  return medians
+}
+
+// ---------------------------------------------------------------------------
 // Tax rates
 // ---------------------------------------------------------------------------
 
